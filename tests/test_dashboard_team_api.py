@@ -92,3 +92,86 @@ def test_dashboard_checkpoint_answers_are_recorded_as_the_owner_clicking(client)
     task = next(t for t in app_mod.team.store.list_tasks(d) if t.kind == "checkpoint")
     assert c.post(f"/api/team/tasks/{task.id}/checkpoint", json={"decision": "approve", "message": "https://tidewatch.example"}).status_code == 200
     assert c.get(f"/api/team/directives/{d}/report").json()["owner_confirmations"][0]["via"] == "dashboard"
+
+
+def test_accounts_api(client):
+    c, _ = client
+    # Initially empty or default
+    r = c.get("/api/accounts")
+    assert r.status_code == 200
+    assert "accounts" in r.json()
+
+    # Link account
+    r_link = c.post("/api/accounts", json={
+        "platform": "reddit",
+        "handle": "founder_john",
+        "alias": "alt1",
+        "focus": ["r/saas", "r/startups"],
+        "mode": "manual",
+    })
+    assert r_link.status_code == 200
+    assert r_link.json()["ok"] is True
+
+    # Check listed
+    r_list = c.get("/api/accounts").json()
+    assert any(a["handle"] == "founder_john" and a["platform"] == "reddit" for a in r_list["accounts"])
+
+    # Set voice
+    r_voice = c.post("/api/accounts/reddit/founder_john/voice", json={
+        "samples": ["Hey, that sounds like a common issue. I usually solve it with a webhook."]
+    })
+    assert r_voice.status_code == 200
+
+    # Unlink
+    r_unlink = c.delete("/api/accounts/reddit/founder_john")
+    assert r_unlink.status_code == 200
+    assert r_unlink.json()["ok"] is True
+
+
+def test_connections_api(client):
+    c, _ = client
+    r = c.get("/api/connections")
+    assert r.status_code == 200
+    body = r.json()
+    assert "sources" in body
+    names = {s["source"] for s in body["sources"]}
+    assert {"reddit", "youtube", "hackernews", "web", "twitter", "github", "quora", "model"}.issubset(names)
+
+
+def test_voice_lint_and_disclosures_api(client):
+    c, _ = client
+    r_disc = c.get("/api/voice/disclosures")
+    assert r_disc.status_code == 200
+    assert len(r_disc.json()["phrases"]) > 0
+
+    r_lint = c.post("/api/voice/lint", json={
+        "text": "Honestly this is totally game-changing! It's not just a tool, it's a revolution -- check it out.",
+        "platform": "reddit",
+        "kind": "value_first",
+    })
+    assert r_lint.status_code == 200
+    lint_res = r_lint.json()
+    assert "issues" in lint_res
+    assert lint_res["passed"] is False  # contains buzzwords, contrast frame, double dash
+
+
+def test_team_intake_api(client):
+    c, _ = client
+    r = c.get("/api/team/intake")
+    assert r.status_code == 200
+    st = r.json()
+    assert "ask_next" in st
+    assert "collected" in st
+
+    r_turn = c.post("/api/team/intake", json={
+        "answers": {"product": "Automated invoice reminders for freelancers"}
+    })
+    assert r_turn.status_code == 200
+    turn_res = r_turn.json()
+    assert "product" in turn_res["collected"]
+
+    # Test reset
+    r_del = c.delete("/api/team/intake")
+    assert r_del.status_code == 200
+    del_res = r_del.json()
+    assert "product" not in del_res["collected"]

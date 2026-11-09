@@ -15,8 +15,11 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Video,
+  UserCheck,
+  Plus,
 } from 'lucide-react';
-import type { GeneratedReply, LeadQualification, LintReport, LintIssue } from '../types';
+import type { GeneratedReply, LeadQualification, LintReport, LintIssue, LinkedAccountDetail } from '../types';
 import { api } from '../api';
 
 interface ReplyStudioViewProps {
@@ -29,8 +32,9 @@ const PLATFORM_MAX_WORDS: Record<string, number> = {
   twitter: 45,
   github: 120,
   reddit: 150,
+  youtube: 150,
   quora: 150,
-  web: 150,
+  web: 150, 
   hackernews: 0,
 };
 
@@ -53,6 +57,10 @@ export const ReplyStudioView: React.FC<ReplyStudioViewProps> = ({
   const [selectedLeadId, setSelectedLeadId] = useState<string>(initialLeadId || (leads[0]?.id || ''));
   const [lead, setLead] = useState<LeadQualification | null>(null);
   const [reply, setReply] = useState<GeneratedReply | null>(null);
+  const [replies, setReplies] = useState<GeneratedReply[]>([]);
+  const [selectedReplyId, setSelectedReplyId] = useState<string>('');
+  const [accounts, setAccounts] = useState<LinkedAccountDetail[]>([]);
+  const [selectedAccountKey, setSelectedAccountKey] = useState<string>('');
   const [selectedVersion, setSelectedVersion] = useState<'value_first' | 'product_aware' | 'custom'>('value_first');
   const [editedText, setEditedText] = useState('');
   const [copied, setCopied] = useState(false);
@@ -66,31 +74,49 @@ export const ReplyStudioView: React.FC<ReplyStudioViewProps> = ({
     message: string;
   } | null>(null);
 
-  const loadLeadAndReply = useCallback(async (id: string) => {
+  useEffect(() => {
+    void api.getAccounts().then(setAccounts).catch(() => {});
+  }, []);
+
+  const loadLeadAndReply = useCallback(async (id: string, replyIdToSelect?: string) => {
     setLoading(true);
     setPublishStatus(null);
     try {
       const data = await api.getLead(id);
       setLead(data.lead);
 
-      if (data.reply) {
-        setReply(data.reply);
-        setSelectedVersion(data.reply.selected_version);
+      const allReplies = data.replies && data.replies.length > 0 ? data.replies : (data.reply ? [data.reply] : []);
+      setReplies(allReplies);
+
+      const targetReply = replyIdToSelect
+        ? allReplies.find((r) => r.id === replyIdToSelect) || allReplies[0]
+        : (data.reply || allReplies[0] || null);
+
+      if (targetReply) {
+        setReply(targetReply);
+        setSelectedReplyId(targetReply.id);
+        setSelectedAccountKey(targetReply.account_id || '');
+        setSelectedVersion(targetReply.selected_version);
         setEditedText(
-          data.reply.edited_reply ||
-            (data.reply.selected_version === 'product_aware'
-              ? data.reply.product_aware
-              : data.reply.value_first)
+          targetReply.edited_reply ||
+            (targetReply.selected_version === 'product_aware'
+              ? targetReply.product_aware
+              : targetReply.value_first)
         );
       } else {
         // If Hacker News, the platform bans AI drafts
         if (data.lead.platform === 'hackernews' || data.lead.reply_policy === 'human_only') {
           setReply(null);
+          setReplies([]);
+          setSelectedReplyId('');
           setSelectedVersion('custom');
           setEditedText('');
         } else {
           const generated = await api.generateReply(id);
           setReply(generated);
+          setReplies([generated]);
+          setSelectedReplyId(generated.id);
+          setSelectedAccountKey(generated.account_id || '');
           setSelectedVersion(generated.selected_version);
           setEditedText(generated.value_first);
         }
@@ -104,6 +130,41 @@ export const ReplyStudioView: React.FC<ReplyStudioViewProps> = ({
       setLoading(false);
     }
   }, []);
+
+  const switchReply = (r: GeneratedReply) => {
+    setReply(r);
+    setSelectedReplyId(r.id);
+    setSelectedAccountKey(r.account_id || '');
+    setSelectedVersion(r.selected_version);
+    setEditedText(
+      r.edited_reply ||
+        (r.selected_version === 'product_aware' ? r.product_aware : r.value_first)
+    );
+  };
+
+  const handleAddReplyOnThread = async () => {
+    if (!selectedLeadId) return;
+    setLoading(true);
+    try {
+      const newReply = await api.generateReply(selectedLeadId, {
+        keep_others: true,
+        account: selectedAccountKey || undefined,
+      });
+      setReplies((prev) => [...prev, newReply]);
+      switchReply(newReply);
+      setPublishStatus({
+        type: 'success',
+        message: 'Drafted another reply on this thread!',
+      });
+    } catch (err: any) {
+      setPublishStatus({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Could not draft another reply on this thread.',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     void api.getDisclosures().then((res) => {
@@ -175,8 +236,9 @@ export const ReplyStudioView: React.FC<ReplyStudioViewProps> = ({
       return;
     }
     try {
-      const updated = await api.approveReply(selectedLeadId, editedText, selectedVersion);
+      const updated = await api.approveReply(selectedLeadId, editedText, selectedVersion, reply?.id);
       setReply(updated);
+      setReplies((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
       setPublishStatus({
         type: 'success',
         message: 'Reply draft approved! You can now proceed to copy and mark for posting.',
@@ -192,13 +254,17 @@ export const ReplyStudioView: React.FC<ReplyStudioViewProps> = ({
   const handlePublish = async () => {
     if (!selectedLeadId) return;
     try {
-      const res = await api.publishReply(selectedLeadId);
+      const res = await api.publishReply(selectedLeadId, reply?.id);
       if (res.success) {
         setPublishStatus({
           type: 'success',
           message: res.message || 'Reply copied to clipboard and discussion link ready. Post on the platform, then click Confirm It Was Posted.',
         });
-        if (reply) setReply({ ...reply, status: 'pending_manual_post' });
+        if (reply) {
+          const marked = { ...reply, status: 'pending_manual_post' as const };
+          setReply(marked);
+          setReplies((prev) => prev.map((r) => (r.id === marked.id ? marked : r)));
+        }
         await navigator.clipboard.writeText(editedText);
         setCopied(true);
         setTimeout(() => setCopied(false), 3000);
@@ -225,7 +291,11 @@ export const ReplyStudioView: React.FC<ReplyStudioViewProps> = ({
           type: 'success',
           message: res.message || 'Publication successfully confirmed and recorded in history.',
         });
-        if (reply) setReply({ ...reply, status: 'published' });
+        if (reply) {
+          const marked = { ...reply, status: 'published' as const };
+          setReply(marked);
+          setReplies((prev) => prev.map((r) => (r.id === marked.id ? marked : r)));
+        }
       } else {
         setPublishStatus({
           type: 'error',
@@ -392,7 +462,109 @@ export const ReplyStudioView: React.FC<ReplyStudioViewProps> = ({
           <div>Synthesizing context and drafting compliant response…</div>
         </div>
       ) : (
-        <section className="studio-grid">
+        <>
+          {/* Thread Replies Multi-Target Bar */}
+          <section
+            className="panel"
+            style={{
+              padding: 'var(--sp-3) var(--sp-4)',
+              marginBottom: 'var(--sp-4)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 'var(--sp-3)',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-muted)' }}>
+                Thread Replies ({replies.length}/3 max):
+              </span>
+              {replies.map((r, idx) => {
+                const isCurrent = r.id === selectedReplyId;
+                const targetName =
+                  r.target_kind === 'comment'
+                    ? `Comment by @${r.target_author || 'user'}`
+                    : 'Post Target';
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className={`btn btn-sm ${isCurrent ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => switchReply(r)}
+                    style={{ fontSize: 'var(--fs-xs)' }}
+                  >
+                    <span>#{idx + 1}: {targetName}</span>
+                    <span
+                      style={{
+                        fontSize: '10px',
+                        padding: '1px 4px',
+                        borderRadius: '4px',
+                        background: isCurrent ? 'rgba(255,255,255,0.25)' : 'var(--surface-subtle)',
+                      }}
+                    >
+                      {r.status}
+                    </span>
+                  </button>
+                );
+              })}
+              {replies.length < 3 && !isHumanOnly && !isLocked && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleAddReplyOnThread}
+                  title="Draft a second reply to another comment in this thread under thread safety rules"
+                >
+                  <Plus size={13} />
+                  <span>Add Reply Target</span>
+                </button>
+              )}
+            </div>
+
+            {/* Account Indicator */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+              <UserCheck size={14} style={{ color: 'var(--text-muted)' }} />
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+                Assigned Account:
+              </span>
+              {reply?.account_id ? (
+                <span className="badge badge-primary" title="Locked to this account for the entire thread">
+                  {reply.account_id}
+                </span>
+              ) : (
+                <select
+                  className="select"
+                  style={{ padding: '2px 8px', fontSize: 'var(--fs-xs)', height: '28px' }}
+                  value={selectedAccountKey}
+                  onChange={(e) => setSelectedAccountKey(e.target.value)}
+                >
+                  <option value="">Auto-pick Account</option>
+                  {accounts
+                    .filter((a) => a.platform === lead.platform)
+                    .map((a) => (
+                      <option key={`${a.platform}:${a.handle}`} value={`${a.platform}:${a.handle}`}>
+                        @{a.handle} {a.alias ? `(${a.alias})` : ''} - Stage {a.health.stage}: {a.health.stage_name}
+                      </option>
+                    ))}
+                </select>
+              )}
+            </div>
+          </section>
+
+          {/* YouTube Specific Notice */}
+          {lead.platform === 'youtube' && (
+            <div className="notice notice-info" style={{ marginBottom: 'var(--sp-4)' }}>
+              <Video size={16} />
+              <div>
+                <strong>YouTube Engagement Mode</strong>
+                <span>
+                  The app creates customized, value-first comments based on the video context and top comments. The app does not write to the YouTube API. When approved, click &quot;Publish&quot; to copy the text and open the video with your targeted comment highlighted.
+                </span>
+              </div>
+            </div>
+          )}
+
+          <section className="studio-grid">
           {/* Left Column: Context & Evidence */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
             <div className="card" style={{ padding: 'var(--sp-5)' }}>
@@ -885,6 +1057,7 @@ export const ReplyStudioView: React.FC<ReplyStudioViewProps> = ({
             </div>
           </div>
         </section>
+        </>
       )}
     </div>
   );

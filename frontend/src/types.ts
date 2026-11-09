@@ -145,6 +145,7 @@ export interface LintReport {
 export interface GeneratedReply {
   id: string;
   lead_id: string;
+  account_id?: string;
   value_first: string;
   product_aware: string;
   edited_reply?: string;
@@ -186,6 +187,9 @@ export interface PostingSettings {
   interval_jitter?: number;
   max_mention_ratio?: number;
   require_rules_ack?: boolean;
+  max_replies_per_thread?: number;
+  min_thread_gap_minutes?: number;
+  product_community_gap_days?: number;
   reddit_client_id?: string;
   reddit_client_secret?: string;
   reddit_username?: string;
@@ -223,6 +227,121 @@ export interface PlatformInfo {
   platforms: string[];
   default: string[];
   weak: string[];
+  needs_key?: string[];
+}
+
+export interface AccountHealth {
+  stage: number;
+  stage_name: string;
+  max_pitch_level: number;
+  suggested_daily_cap: number;
+  reasons: string[];
+  known: boolean;
+}
+
+export interface AccountCredentialVariable {
+  name: string;
+  set: boolean;
+  also_read?: string | null;
+}
+
+export interface AccountCredentialReport {
+  account: string;
+  posting: 'api' | 'manual';
+  ready: boolean;
+  variables: AccountCredentialVariable[];
+  note: string;
+}
+
+export interface LinkedAccountDetail {
+  platform: string;
+  handle: string;
+  alias: string;
+  focus: string[];
+  mode: 'manual' | 'api';
+  health: AccountHealth;
+  credentials: AccountCredentialReport;
+  voice_samples_count: number;
+  voice_samples?: string[];
+  added_at: number;
+  snapshot: Record<string, any>;
+}
+
+export interface ConnectionVariable {
+  name: string;
+  required: boolean;
+  purpose: string;
+  set: boolean;
+}
+
+export interface ConnectionPackage {
+  import: string;
+  install: string;
+  purpose: string;
+  installed: boolean;
+}
+
+export interface ConnectionSource {
+  source: string;
+  name: string;
+  works_without_setup: string;
+  read_variables: ConnectionVariable[];
+  packages: ConnectionPackage[];
+  posting: string;
+  posting_variables?: string;
+  how_to_get: string[];
+  limits: string;
+  accounts?: Array<{
+    id: string;
+    mode: string;
+    alias: string | null;
+    credentials: AccountCredentialReport;
+  }>;
+  accounts_linked?: number;
+  status: 'ready' | 'partial';
+  server_model_ready?: boolean;
+  search_with_api?: boolean;
+  transcripts_ready?: boolean;
+}
+
+export interface ConnectionsGuide {
+  sources: ConnectionSource[];
+  where_to_set_variables: string;
+  several_accounts: string;
+}
+
+export interface CEOIntakeJob {
+  id: string;
+  platform: string;
+  status: 'running' | 'done' | 'failed' | 'interrupted';
+  summary?: string;
+  threads?: number;
+  communities?: Array<{ name: string; threads: number }>;
+  queries?: number;
+  rejected?: Record<string, number>;
+}
+
+export interface CEOIntakeQuestion {
+  key: string;
+  question: string;
+  why: string;
+}
+
+export interface CEOIntakeState {
+  collected: Record<string, string>;
+  accepted: string[];
+  rejected: Record<string, string>;
+  missing_required: Array<{ key: string; question: string }>;
+  jobs: CEOIntakeJob[];
+  started_now: string[];
+  tell_owner: string;
+  ask_next: CEOIntakeQuestion[];
+  actions_for_you: string[];
+  prefetched_threads: number;
+  directive_id?: string | null;
+  ready_for_pipeline: boolean;
+  suggested_request?: string;
+  next?: string;
 }
 
 export interface AnalyticsSummary {

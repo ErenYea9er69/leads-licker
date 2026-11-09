@@ -25,6 +25,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   reddit: 'Reddit',
   hackernews: 'Hacker News',
   web: 'Public Web',
+  youtube: 'YouTube Discussions',
   quora: 'Quora',
   github: 'GitHub Issues',
   twitter: 'Twitter / X',
@@ -45,6 +46,17 @@ function formatDiagnosticKey(key: string): string {
   if (key === 'duplicate') return 'Duplicate URLs skipped';
   if (key === 'promotional') return 'Promotional / seller posts';
   if (key === 'crowded') return 'Overcrowded (>80 comments)';
+  if (key === 'youtube_comments_disabled') return 'YouTube comments turned off';
+  if (key === 'youtube_live_or_upcoming') return 'Live / upcoming YouTube streams skipped';
+  if (key === 'youtube_for_kids') return 'Made-for-kids YouTube videos skipped';
+  if (key === 'youtube_not_target_language') return 'YouTube videos in other languages skipped';
+  if (key.startsWith('youtube_api:')) {
+    const sub = key.replace('youtube_api:', '');
+    if (sub === 'no_key') return 'YouTube API key unconfigured (using web search fallback)';
+    if (sub === 'quota') return 'YouTube daily quota reached';
+    if (sub === 'comments_disabled') return 'Comments disabled on YouTube video';
+    return `YouTube API (${sub.replaceAll('_', ' ')})`;
+  }
   if (key.startsWith('qualifier:')) {
     const sub = key.replace('qualifier:', '');
     if (sub === 'low_score') return 'Below qualification score threshold';
@@ -324,6 +336,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
               {platformInfo.platforms.map((p) => {
                 const isSelected = selectedPlatforms.includes(p);
                 const isWeak = platformInfo.weak?.includes(p);
+                const needsKey = platformInfo.needs_key?.includes(p);
                 return (
                   <button
                     key={p}
@@ -332,10 +345,32 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({
                     aria-pressed={isSelected}
                     onClick={() => togglePlatform(p)}
                     disabled={running}
-                    title={isWeak ? 'Secondary platform: lower lead volume or restrictive API rate limits' : undefined}
+                    title={
+                      needsKey
+                        ? 'Keyed Data API allows comment counts, top comments, & transcripts; web search fallback without key'
+                        : isWeak
+                        ? 'Secondary platform: lower lead volume or restrictive API rate limits'
+                        : undefined
+                    }
                   >
                     {isSelected && <Check size={13} />}
                     <span>{PLATFORM_LABELS[p] || p}</span>
+                    {needsKey && (
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          opacity: 0.9,
+                          marginLeft: '4px',
+                          fontWeight: 500,
+                          padding: '1px 5px',
+                          borderRadius: '4px',
+                          background: isSelected ? 'rgba(255,255,255,0.25)' : 'var(--warning-bg)',
+                          color: isSelected ? 'inherit' : 'var(--warning-text)',
+                        }}
+                      >
+                        API Key
+                      </span>
+                    )}
                     {isWeak && (
                       <span
                         style={{

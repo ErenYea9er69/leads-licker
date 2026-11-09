@@ -3,11 +3,14 @@ import type {
   AskCeoResponse,
   BusinessProfile,
   Campaign,
+  CEOIntakeState,
   CheckpointResolution,
+  ConnectionsGuide,
   DirectiveDetail,
   DirectiveSummary,
   GeneratedReply,
   LeadQualification,
+  LinkedAccountDetail,
   LintReport,
   MemoryItem,
   NextStep,
@@ -203,9 +206,15 @@ export const api = {
     return await handleResponse<Record<string, number>>(res);
   },
 
-  async getLead(id: string): Promise<{ lead: LeadQualification; reply?: GeneratedReply | null }> {
+  async getLead(id: string): Promise<{ lead: LeadQualification; reply?: GeneratedReply | null; replies?: GeneratedReply[] }> {
     const res = await fetch(`${BASE_URL}/leads/${id}`);
-    return await handleResponse<{ lead: LeadQualification; reply?: GeneratedReply | null }>(res);
+    return await handleResponse<{ lead: LeadQualification; reply?: GeneratedReply | null; replies?: GeneratedReply[] }>(res);
+  },
+
+  async getRepliesForLead(leadId: string): Promise<GeneratedReply[]> {
+    const res = await fetch(`${BASE_URL}/leads/${leadId}/replies`);
+    const data = await handleResponse<{ replies: GeneratedReply[] }>(res);
+    return data.replies || [];
   },
 
   // Replies
@@ -215,23 +224,38 @@ export const api = {
     return data.reply;
   },
 
-  async generateReply(leadId: string): Promise<GeneratedReply> {
-    const res = await fetch(`${BASE_URL}/replies/${leadId}/generate`, { method: 'POST' });
-    const data = await handleResponse<{ ok: boolean; reply: GeneratedReply }>(res);
-    return data.reply;
-  },
-
-  async approveReply(leadId: string, editedReply?: string, selectedVersion?: string): Promise<GeneratedReply> {
-    const res = await fetch(`${BASE_URL}/replies/${leadId}/approve`, {
+  async generateReply(
+    leadId: string,
+    options?: { account?: string; target_mode?: string; comment_id?: string; keep_others?: boolean }
+  ): Promise<GeneratedReply> {
+    const res = await fetch(`${BASE_URL}/replies/${leadId}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ edited_reply: editedReply, selected_version: selectedVersion }),
+      body: JSON.stringify(options || {}),
     });
     const data = await handleResponse<{ ok: boolean; reply: GeneratedReply }>(res);
     return data.reply;
   },
 
-  async publishReply(leadId: string): Promise<{
+  async approveReply(
+    leadId: string,
+    editedReply?: string,
+    selectedVersion?: string,
+    replyId?: string
+  ): Promise<GeneratedReply> {
+    const res = await fetch(`${BASE_URL}/replies/${leadId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ edited_reply: editedReply, selected_version: selectedVersion, reply_id: replyId }),
+    });
+    const data = await handleResponse<{ ok: boolean; reply: GeneratedReply }>(res);
+    return data.reply;
+  },
+
+  async publishReply(
+    leadId: string,
+    replyId?: string
+  ): Promise<{
     success: boolean;
     action?: string;
     text?: string;
@@ -239,7 +263,11 @@ export const api = {
     reason?: string;
     message?: string;
   }> {
-    const res = await fetch(`${BASE_URL}/replies/${leadId}/publish`, { method: 'POST' });
+    const res = await fetch(`${BASE_URL}/replies/${leadId}/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reply_id: replyId }),
+    });
     return await handleResponse<{
       success: boolean;
       action?: string;
@@ -253,6 +281,54 @@ export const api = {
   async confirmPublished(leadId: string): Promise<{ success: boolean; message?: string; reason?: string }> {
     const res = await fetch(`${BASE_URL}/replies/${leadId}/confirm-published`, { method: 'POST' });
     return await handleResponse<{ success: boolean; message?: string; reason?: string }>(res);
+  },
+
+  // Linked Accounts
+  async getAccounts(): Promise<LinkedAccountDetail[]> {
+    const res = await fetch(`${BASE_URL}/accounts`);
+    const data = await handleResponse<{ accounts: LinkedAccountDetail[] }>(res);
+    return data.accounts || [];
+  },
+
+  async linkAccount(data: {
+    platform: string;
+    handle: string;
+    alias?: string;
+    focus?: string[];
+    mode?: 'manual' | 'api';
+  }): Promise<LinkedAccountDetail> {
+    const res = await fetch(`${BASE_URL}/accounts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const resData = await handleResponse<{ ok: boolean; account: LinkedAccountDetail }>(res);
+    return resData.account;
+  },
+
+  async unlinkAccount(platform: string, handle: string): Promise<boolean> {
+    const res = await fetch(`${BASE_URL}/accounts/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}`, {
+      method: 'DELETE',
+    });
+    const data = await handleResponse<{ ok: boolean }>(res);
+    return data.ok;
+  },
+
+  async setAccountVoice(platform: string, handle: string, samples: string[]): Promise<boolean> {
+    const res = await fetch(`${BASE_URL}/accounts/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/voice`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ samples }),
+    });
+    const data = await handleResponse<{ ok: boolean }>(res);
+    return data.ok;
+  },
+
+  // Connections Guide
+  async getConnections(source?: string): Promise<ConnectionsGuide> {
+    const url = source ? `${BASE_URL}/connections?source=${encodeURIComponent(source)}` : `${BASE_URL}/connections`;
+    const res = await fetch(url);
+    return await handleResponse<ConnectionsGuide>(res);
   },
 
   // Voice & Copywriting Linter
@@ -381,6 +457,30 @@ export const api = {
         method: 'DELETE',
       });
       return await handleResponse<{ forgotten: number }>(res);
+    },
+
+    async getIntake(): Promise<CEOIntakeState> {
+      const res = await fetch(`${BASE_URL}/team/intake`);
+      return await handleResponse<CEOIntakeState>(res);
+    },
+
+    async submitIntake(
+      answers?: Record<string, any>,
+      skip?: string[]
+    ): Promise<CEOIntakeState> {
+      const res = await fetch(`${BASE_URL}/team/intake`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers, skip }),
+      });
+      return await handleResponse<CEOIntakeState>(res);
+    },
+
+    async resetIntake(): Promise<CEOIntakeState> {
+      const res = await fetch(`${BASE_URL}/team/intake`, {
+        method: 'DELETE',
+      });
+      return await handleResponse<CEOIntakeState>(res);
     },
 
     async getRoster(): Promise<TeamRoster> {

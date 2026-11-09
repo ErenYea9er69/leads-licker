@@ -13,6 +13,7 @@ import {
   Bot,
   AlertTriangle,
   ShieldAlert,
+  Video,
 } from 'lucide-react';
 import type { LeadQualification } from '../types';
 import { api } from '../api';
@@ -28,6 +29,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   reddit: 'Reddit',
   hackernews: 'Hacker News',
   web: 'Public Web',
+  youtube: 'YouTube',
   quora: 'Quora',
   github: 'GitHub Issues',
   twitter: 'Twitter / X',
@@ -141,6 +143,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ leads: initialLeads, onOpe
           <option value="reddit">Reddit</option>
           <option value="hackernews">Hacker News</option>
           <option value="web">Public Web</option>
+          <option value="youtube">YouTube</option>
           <option value="quora">Quora</option>
           <option value="github">GitHub Issues</option>
           <option value="twitter">Twitter / X</option>
@@ -251,7 +254,14 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ leads: initialLeads, onOpe
 
                   <div className="lead-main">
                     <div className="lead-meta" style={{ flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
-                      <span className="badge badge-low">{PLATFORM_LABELS[lead.platform] || lead.platform}</span>
+                      {lead.platform === 'youtube' ? (
+                        <span className="badge" style={{ background: '#fef2f2', color: '#991b1b', borderColor: '#fecaca' }}>
+                          <Video size={11} style={{ display: 'inline', marginRight: '3px' }} />
+                          YouTube
+                        </span>
+                      ) : (
+                        <span className="badge badge-low">{PLATFORM_LABELS[lead.platform] || lead.platform}</span>
+                      )}
                       <span style={{ fontWeight: 600 }}>{lead.community}</span>
                       <span>·</span>
                       <span>{lead.published_at || 'Recent'}</span>
@@ -515,6 +525,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ leads: initialLeads, onOpe
               ))}
               <p>{selectedLead.score_breakdown.explanation}</p>
             </div>
+
+            {selectedLead.platform === 'youtube' && (
+              <div className="notice notice-info" style={{ marginBottom: 'var(--sp-4)', fontSize: 'var(--fs-xs)' }}>
+                <Video size={16} />
+                <div>
+                  <strong>YouTube Lead Insight</strong>
+                  <span>
+                    Replies to YouTube videos and comments are manual by design. Reply Studio prepares value-first advice tailored to the video topic or top comments.
+                  </span>
+                </div>
+              </div>
+            )}
 
             <div className="detail-block">
               <label className="label">Customer Evidence Quote</label>

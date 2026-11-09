@@ -18,6 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from agent_reach import __version__
+from agent_reach.discovery.accounts import AccountService, compute_health
+from agent_reach.discovery.connections import connections as get_connections_report
 from agent_reach.discovery.llm_client import LLMProviderError
 from agent_reach.discovery.models import (
     BusinessProfile,
@@ -27,6 +29,9 @@ from agent_reach.discovery.orchestrator import DiscoveryOrchestrator, validate_p
 from agent_reach.discovery.reply_generator import ReplyGenerationError
 from agent_reach.discovery.search_planner import VALID_PLATFORMS
 from agent_reach.discovery.storage import DiscoveryStorage
+from agent_reach.discovery.voice import lint_reply
+from agent_reach.discovery.skillpack import disclosure_phrases
+from agent_reach.team.intake import Intake
 
 log = logging.getLogger("agent_reach.server")
 
@@ -142,6 +147,42 @@ class LaunchCampaignRequest(BaseModel):
 class ApproveReplyRequest(BaseModel):
     edited_reply: Optional[str] = None
     selected_version: Optional[str] = "value_first"
+    reply_id: Optional[str] = None
+
+
+class GenerateReplyRequest(BaseModel):
+    account: Optional[str] = None
+    target_mode: Optional[str] = "auto"
+    comment_id: Optional[str] = None
+    keep_others: Optional[bool] = False
+
+
+class PublishReplyRequest(BaseModel):
+    reply_id: Optional[str] = None
+
+
+class LinkAccountRequest(BaseModel):
+    platform: str
+    handle: str
+    alias: Optional[str] = ""
+    focus: Optional[List[str]] = None
+    mode: str = "manual"
+
+
+class AccountVoiceRequest(BaseModel):
+    samples: List[str] = Field(default_factory=list)
+
+
+class LintRequest(BaseModel):
+    text: str
+    kind: Optional[str] = "value_first"
+    platform: Optional[str] = "reddit"
+    lead_id: Optional[str] = None
+
+
+class IntakeTurnRequest(BaseModel):
+    answers: Optional[Dict[str, Any]] = None
+    skip: Optional[List[str]] = None
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -295,10 +336,21 @@ def get_lead(lead_id: str):
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     reply = storage.get_reply_by_lead_id(lead_id)
+    replies = storage.list_replies_for_lead(lead_id)
     return {
         "lead": lead.model_dump(),
         "reply": reply.model_dump() if reply else None,
+        "replies": [r.model_dump() for r in replies],
     }
+
+
+@app.get("/api/leads/{lead_id}/replies")
+def get_lead_replies(lead_id: str):
+    lead = storage.get_lead(lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    replies = storage.list_replies_for_lead(lead_id)
+    return {"replies": [r.model_dump() for r in replies]}
 
 
 # ── Endpoints: Replies ──
@@ -312,7 +364,7 @@ def get_reply(lead_id: str):
 
 
 @app.post("/api/replies/{lead_id}/generate")
-def generate_reply(lead_id: str, request: Request):
+def generate_reply(lead_id: str, request: Request, req: Optional[GenerateReplyRequest] = None):
     client_ip = request.client.host if request.client else "local"
     if not rate_limiter.check(f"generate_reply:{client_ip}", max_requests=30):
         raise HTTPException(status_code=429, detail="Rate limit exceeded for reply generation.")
@@ -323,41 +375,56 @@ def generate_reply(lead_id: str, request: Request):
     if not profile:
         raise HTTPException(status_code=400, detail="Business profile required to generate replies.")
     try:
-        reply = orchestrator.reply_generator.generate_replies(lead, profile)
+        reply = orchestrator.generate_reply(
+            lead,
+            profile=profile,
+            account=req.account if req and req.account else "",
+            target_mode=req.target_mode if req and req.target_mode else "auto",
+            comment_id=req.comment_id if req and req.comment_id else "",
+            keep_others=bool(req and req.keep_others),
+        )
     except (LLMProviderError, ReplyGenerationError) as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    storage.save_reply(reply)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, "reply": reply.model_dump()}
 
 
 @app.post("/api/replies/{lead_id}/approve")
 def approve_reply(lead_id: str, req: ApproveReplyRequest):
-    reply = storage.get_reply_by_lead_id(lead_id)
-    if not reply:
+    target_reply = None
+    if req.reply_id:
+        target_reply = storage.get_reply(req.reply_id)
+    if not target_reply:
+        target_reply = storage.get_reply_by_lead_id(lead_id)
+    if not target_reply:
         raise HTTPException(status_code=404, detail="Reply not found")
     try:
-        reply = orchestrator.reply_generator.approve_reply(
-            reply, edited_text=req.edited_reply, selected_version=req.selected_version
+        reply = orchestrator.approve_reply(
+            target_reply.id, edited_text=req.edited_reply, selected_version=req.selected_version
         )
-    except ValueError as exc:
+    except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    storage.save_reply(reply)
     return {"ok": True, "reply": reply.model_dump()}
 
 
 @app.post("/api/replies/{lead_id}/publish")
-def publish_reply(lead_id: str):
+def publish_reply(lead_id: str, req: Optional[PublishReplyRequest] = None):
     lead = storage.get_lead(lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    reply = storage.get_reply_by_lead_id(lead_id)
-    if not reply:
+    target_reply = None
+    if req and req.reply_id:
+        target_reply = storage.get_reply(req.reply_id)
+    if not target_reply:
+        target_reply = storage.get_reply_by_lead_id(lead_id)
+    if not target_reply:
         raise HTTPException(status_code=404, detail="Reply not found")
 
     settings_dict = storage.get_setting("posting_settings", PostingSettings().model_dump())
     settings = PostingSettings.model_validate(settings_dict)
 
-    result = orchestrator.publisher.publish_or_copy(reply, lead, settings)
+    result = orchestrator.publisher.publish_or_copy(target_reply, lead, settings)
     return result
 
 
@@ -586,6 +653,126 @@ def team_memory_forget(memory_id: int):
 @app.get("/api/team/roster")
 def team_roster():
     return team.describe_team()
+
+
+# ── Endpoints: Accounts ──
+
+@app.get("/api/accounts")
+def list_accounts():
+    accounts = orchestrator.accounts.list()
+    profile = storage.get_latest_business_profile()
+    product_name = profile.name if profile else ""
+    out = []
+    for acc in accounts:
+        health = orchestrator.accounts.health(acc.platform, acc.handle, product_name=product_name)
+        creds = orchestrator.accounts.credential_report(acc)
+        voice = orchestrator.accounts.voice_of(acc)
+        out.append({
+            "platform": acc.platform,
+            "handle": acc.handle,
+            "alias": acc.alias,
+            "focus": acc.focus,
+            "mode": acc.mode,
+            "health": health.to_dict(),
+            "credentials": creds,
+            "voice_samples_count": len(voice.get("voice_samples", [])),
+            "voice_samples": voice.get("voice_samples", []),
+            "added_at": acc.added_at,
+            "snapshot": acc.snapshot,
+        })
+    return {"accounts": out}
+
+
+@app.post("/api/accounts")
+def link_account(req: LinkAccountRequest):
+    try:
+        acc = orchestrator.accounts.link(
+            platform=req.platform,
+            handle=req.handle,
+            mode=req.mode,  # type: ignore[arg-type]
+            alias=req.alias or "",
+            focus=req.focus,
+        )
+        return {"ok": True, "account": acc.model_dump()}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.delete("/api/accounts/{platform}/{handle}")
+def unlink_account(platform: str, handle: str):
+    success = orchestrator.accounts.unlink(platform, handle)
+    return {"ok": success}
+
+
+@app.post("/api/accounts/{platform}/{handle}/voice")
+def set_account_voice(platform: str, handle: str, req: AccountVoiceRequest):
+    acc = orchestrator.accounts.get(platform, handle)
+    if not acc:
+        raise HTTPException(status_code=404, detail="Account not found")
+    orchestrator.accounts.set_voice(acc, req.samples, {})
+    return {"ok": True}
+
+
+# ── Endpoints: Connections Guide ──
+
+@app.get("/api/connections")
+def get_connections(source: Optional[str] = Query(None)):
+    return get_connections_report(source=source or "", accounts=orchestrator.accounts)
+
+
+# ── Endpoints: Voice & Linter ──
+
+@app.post("/api/voice/lint")
+def lint_text_endpoint(req: LintRequest):
+    profile = storage.get_latest_business_profile()
+    product_name = profile.name if profile else ""
+    report = lint_reply(
+        text=req.text,
+        product_name=product_name,
+        platform=req.platform or "reddit",
+        kind=req.kind or "value_first",
+    )
+    return report.to_dict()
+
+
+@app.get("/api/voice/disclosures")
+def get_disclosures_endpoint():
+    return {"phrases": list(disclosure_phrases())}
+
+
+# ── Endpoints: CEO Intake ──
+
+_intake_instance: Optional[Intake] = None
+
+
+def _get_intake() -> Intake:
+    global _intake_instance
+    if _intake_instance is None:
+        _intake_instance = Intake(lambda: orchestrator, team)
+    return _intake_instance
+
+
+@app.get("/api/team/intake")
+def team_intake_status():
+    intake = _get_intake()
+    st = intake.state()
+    return intake.describe(st)
+
+
+@app.post("/api/team/intake")
+def team_intake_turn(req: IntakeTurnRequest, request: Request):
+    if not rate_limiter.check(f"intake:{_client_ip(request)}", max_requests=30):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded.")
+    intake = _get_intake()
+    return intake.turn(answers=req.answers, skip=req.skip)
+
+
+@app.delete("/api/team/intake")
+def team_intake_reset():
+    intake = _get_intake()
+    intake.reset()
+    st = intake.state()
+    return intake.describe(st)
 
 
 # ── Serve Built Frontend if Present ──

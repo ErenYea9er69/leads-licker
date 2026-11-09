@@ -21,6 +21,12 @@ import {
   Check,
   X,
   MessageSquare,
+  Search,
+  Database,
+  ChevronDown,
+  ChevronUp,
+  RotateCcw,
+  Send,
 } from 'lucide-react';
 import type {
   DirectiveDetail,
@@ -29,6 +35,7 @@ import type {
   TeamRoster,
   MemoryItem,
   BusinessProfile,
+  CEOIntakeState,
 } from '../types';
 import { api } from '../api';
 
@@ -93,7 +100,15 @@ export const TeamView: React.FC<TeamViewProps> = ({
   const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [newMemoryText, setNewMemoryText] = useState<string>('');
 
+  // CEO Intake state
+  const [intakeState, setIntakeState] = useState<CEOIntakeState | null>(null);
+  const [intakeInput, setIntakeInput] = useState<string>('');
+  const [intakeSubmitting, setIntakeSubmitting] = useState<boolean>(false);
+  const [showIntakeSection, setShowIntakeSection] = useState<boolean>(true);
+  const [showFactsSummary, setShowFactsSummary] = useState<boolean>(false);
+
   const pollTimerRef = useRef<number | null>(null);
+  const intakePollRef = useRef<number | null>(null);
 
   const starterPrompts = [
     {
@@ -151,16 +166,43 @@ export const TeamView: React.FC<TeamViewProps> = ({
     }
   }, []);
 
+  const fetchIntake = useCallback(async () => {
+    try {
+      const data = await api.team.getIntake();
+      setIntakeState(data);
+    } catch (err) {
+      console.error('Failed to fetch intake state:', err);
+    }
+  }, []);
+
   // Initial load
   useEffect(() => {
     const init = async () => {
       setLoading(true);
-      await fetchDirectives(true);
-      await fetchRosterAndMemory();
+      await Promise.all([
+        fetchDirectives(true),
+        fetchRosterAndMemory(),
+        fetchIntake(),
+      ]);
       setLoading(false);
     };
     void init();
-  }, [fetchDirectives, fetchRosterAndMemory]);
+  }, [fetchDirectives, fetchRosterAndMemory, fetchIntake]);
+
+  // Polling for live intake background search jobs
+  useEffect(() => {
+    const isSearching = intakeState?.jobs?.some((j) => j.status === 'running');
+    if (isSearching) {
+      intakePollRef.current = window.setInterval(() => {
+        void fetchIntake();
+      }, 3500);
+    }
+    return () => {
+      if (intakePollRef.current) {
+        clearInterval(intakePollRef.current);
+      }
+    };
+  }, [intakeState?.jobs, fetchIntake]);
 
   // Load detail when selectedDirectiveId changes
   useEffect(() => {
@@ -322,6 +364,58 @@ export const TeamView: React.FC<TeamViewProps> = ({
     }
   };
 
+  const handleSubmitIntake = async (key: string, isSkip: boolean = false) => {
+    if (!isSkip && !intakeInput.trim()) return;
+    setIntakeSubmitting(true);
+    try {
+      const answers = isSkip ? undefined : { [key]: intakeInput.trim() };
+      const skip = isSkip ? [key] : undefined;
+      const res = await api.team.submitIntake(answers, skip);
+      setIntakeState(res);
+      setIntakeInput('');
+      setNotice({
+        type: 'success',
+        text: isSkip
+          ? 'Question skipped.'
+          : 'Answer saved! CEO and live harvester updated.',
+      });
+      if (res.directive_id) {
+        await fetchDirectives();
+        setSelectedDirectiveId(res.directive_id);
+      }
+    } catch (err) {
+      setNotice({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Failed to submit intake answer.',
+      });
+    } finally {
+      setIntakeSubmitting(false);
+    }
+  };
+
+  const handleResetIntake = async () => {
+    if (!confirm('Restart the CEO interview? This clears answered facts so you can profile a new product.')) return;
+    setIntakeSubmitting(true);
+    try {
+      const res = await api.team.resetIntake();
+      setIntakeState(res);
+      setIntakeInput('');
+      setNotice({ type: 'info', text: 'Intake interview has been reset.' });
+    } catch (err) {
+      setNotice({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Could not reset intake.',
+      });
+    } finally {
+      setIntakeSubmitting(false);
+    }
+  };
+
+  const handleLaunchIntakeDirective = async () => {
+    if (!intakeState?.suggested_request) return;
+    await handleAskCeo(undefined, intakeState.suggested_request);
+  };
+
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
       case 'running':
@@ -400,6 +494,222 @@ export const TeamView: React.FC<TeamViewProps> = ({
           </button>
         </aside>
       )}
+
+      {/* CEO Interactive Intake & Real-time Harvester */}
+      <section className="ceo-intake-section">
+        <div
+          className="intake-header-bar"
+          onClick={() => setShowIntakeSection(!showIntakeSection)}
+        >
+          <div className="intake-header-left">
+            <span className="intake-avatar">🎙️</span>
+            <div className="intake-header-text">
+              <h3>
+                <span>CEO Intake Interview & Live Harvester</span>
+                {intakeState?.jobs && intakeState.jobs.some((j) => j.status === 'running') && (
+                  <span className="job-status-pill job-status-running">
+                    <span className="pulse-dot" />
+                    Searching Live Sources
+                  </span>
+                )}
+              </h3>
+              <p>
+                Direct dialogue with your CEO to establish product value and ICP. Searches launch in the background as soon as product and users are identified.
+              </p>
+            </div>
+          </div>
+          <div className="intake-header-right">
+            {(intakeState?.prefetched_threads ?? 0) > 0 && (
+              <span
+                className="intake-prefetched-pill"
+                title="Harvested early in background and waiting for Scout to claim"
+              >
+                <Database size={13} />
+                <span>{intakeState?.prefetched_threads} Threads Prefetched</span>
+              </span>
+            )}
+            <button className="btn-icon" aria-label="Toggle Intake">
+              {showIntakeSection ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
+          </div>
+        </div>
+
+        {showIntakeSection && (
+          <div className="intake-body">
+            {intakeState?.ask_next && intakeState.ask_next.length > 0 ? (
+              <div className="intake-question-card">
+                <div className="intake-question-header">
+                  <div>
+                    <span className="intake-question-tag">
+                      {intakeState.missing_required.some((m) => m.key === intakeState.ask_next[0].key)
+                        ? 'Required for Search'
+                        : 'Optimization Question'}
+                    </span>
+                    <h4 className="intake-question-prompt">
+                      {intakeState.ask_next[0].question}
+                    </h4>
+                    <p className="intake-question-why">
+                      <strong>Why CEO asks:</strong> {intakeState.ask_next[0].why}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="intake-input-box">
+                  <textarea
+                    className="intake-textarea"
+                    placeholder="Enter your answer in your own words (e.g. pain points, where they talk, competitors, site, voice habits)..."
+                    value={intakeInput}
+                    onChange={(e) => setIntakeInput(e.target.value)}
+                    disabled={intakeSubmitting}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        void handleSubmitIntake(intakeState.ask_next[0].key, false);
+                      }
+                    }}
+                  />
+                  <div className="intake-actions-row">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleSubmitIntake(intakeState.ask_next[0].key, true)}
+                      disabled={intakeSubmitting}
+                      title="Skip this question for now"
+                    >
+                      Skip Question
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => handleSubmitIntake(intakeState.ask_next[0].key, false)}
+                      disabled={intakeSubmitting || !intakeInput.trim()}
+                    >
+                      {intakeSubmitting ? (
+                        <LoaderCircle size={14} className="spin" />
+                      ) : (
+                        <Send size={14} />
+                      )}
+                      <span>Submit Answer (Ctrl+Enter)</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : intakeState?.suggested_request ? (
+              <div className="intake-completed-card">
+                <div className="title-row">
+                  <CheckCircle2 size={18} className="text-success" />
+                  <strong>Intake Interview Complete & Ready for Pipeline</strong>
+                </div>
+                <p style={{ margin: 0, fontSize: '13px' }}>
+                  The CEO has gathered the essential context and preliminary searches have primed the discovery queue.
+                </p>
+                <div className="intake-brief-box">
+                  {intakeState.suggested_request}
+                </div>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleResetIntake}
+                    disabled={actionLoading}
+                  >
+                    <RotateCcw size={13} />
+                    <span>Reset & Start Over</span>
+                  </button>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={handleLaunchIntakeDirective}
+                    disabled={actionLoading}
+                  >
+                    <Sparkles size={13} />
+                    <span>Launch Autonomous Directive with this Brief</span>
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {/* Live Search Background Jobs */}
+            {intakeState?.jobs && intakeState.jobs.length > 0 && (
+              <div className="intake-jobs-section">
+                <h4>
+                  <Search size={14} />
+                  <span>Live Harvester Status</span>
+                </h4>
+                <div className="intake-jobs-grid">
+                  {intakeState.jobs.map((job) => (
+                    <div key={job.id} className="intake-job-card">
+                      <div className="job-top-row">
+                        <span className="job-platform-name">
+                          {job.platform === 'youtube'
+                            ? 'YouTube (Transcripts & Comments)'
+                            : job.platform === 'hackernews'
+                            ? 'Hacker News'
+                            : job.platform}
+                        </span>
+                        <span className={`job-status-pill job-status-${job.status}`}>
+                          {job.status === 'running' && <span className="pulse-dot" />}
+                          {job.status === 'done' && <Check size={11} />}
+                          {job.status === 'failed' && <AlertTriangle size={11} />}
+                          {job.status}
+                        </span>
+                      </div>
+                      <div className="job-metrics-row">
+                        <span><strong>{job.queries ?? 0}</strong> queries</span>
+                        <span><strong>{job.threads ?? 0}</strong> threads found</span>
+                      </div>
+                      {job.communities && job.communities.length > 0 && (
+                        <div className="job-communities-text">
+                          Top: {job.communities.map((c) => `${c.name} (${c.threads})`).join(', ')}
+                        </div>
+                      )}
+                      {job.summary && (
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {job.summary}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Collapsible Facts Summary */}
+            {intakeState?.collected && Object.keys(intakeState.collected).length > 0 && (
+              <div className="intake-facts-summary">
+                <div
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+                  onClick={() => setShowFactsSummary(!showFactsSummary)}
+                >
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>
+                    Known Company Facts ({Object.keys(intakeState.collected).length})
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      className="btn-link-sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleResetIntake();
+                      }}
+                      style={{ fontSize: '11px', color: 'var(--danger)' }}
+                    >
+                      Clear / Reset
+                    </button>
+                    {showFactsSummary ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </div>
+                </div>
+                {showFactsSummary && (
+                  <div className="facts-chips-list">
+                    {Object.entries(intakeState.collected).map(([k, v]) => (
+                      <div key={k} className="fact-chip" title={v}>
+                        <strong>{k}:</strong> {v.length > 40 ? `${v.slice(0, 40)}…` : v}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
 
       {/* CEO Prompt Box */}
       <section className="ceo-command-section">
@@ -864,6 +1174,99 @@ export const TeamView: React.FC<TeamViewProps> = ({
                             </div>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Automated 27 Posting Gates Inspection Results */}
+                  {report.inspection && report.inspection.length > 0 && (
+                    <div className="report-inspection-section">
+                      <div className="inspection-section-header">
+                        <ShieldCheck size={18} className="text-primary" />
+                        <div>
+                          <h4>Automated Safety & Pre-Post Inspection Gates</h4>
+                          <p className="inspection-subtitle">
+                            Every generated draft is inspected against 27 posting gates (thread reply limit of 2-3, 60m min thread gap, 7-day community cool-off, platform caps, disclosure phrasing, and safety bounds).
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="inspection-table-wrapper">
+                        <table className="inspection-table">
+                          <thead>
+                            <tr>
+                              <th>Thread / Target</th>
+                              <th>Gate Status</th>
+                              <th>Gate Code</th>
+                              <th>Audit Finding</th>
+                              <th>Attention Flags</th>
+                              <th>Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {report.inspection.map((row, idx) => (
+                              <tr
+                                key={row.reply_id || idx}
+                                className={`inspection-row ${
+                                  row.ready ? 'row-ready' : row.waits ? 'row-wait' : 'row-blocked'
+                                }`}
+                              >
+                                <td className="inspection-title-cell">
+                                  <strong>{row.title || `Reply #${(row.reply_id || '').slice(-6)}`}</strong>
+                                </td>
+                                <td>
+                                  <span
+                                    className={`status-pill ${
+                                      row.ready
+                                        ? 'status-pill-green'
+                                        : row.waits
+                                        ? 'status-pill-amber'
+                                        : 'status-pill-rose'
+                                    }`}
+                                  >
+                                    {row.ready ? 'Ready to Post' : row.waits ? 'Wait Gap Required' : 'Inspection Blocked'}
+                                  </span>
+                                </td>
+                                <td>
+                                  <code className="gate-code-badge">{row.code}</code>
+                                </td>
+                                <td>
+                                  <div className="gate-detail-cell">
+                                    <span className="gate-msg">{row.message}</span>
+                                    {row.editor_verdict && (
+                                      <span className="gate-verdict">Editor: {row.editor_verdict}</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td>
+                                  {row.attention && row.attention.length > 0 ? (
+                                    <div className="attention-tags">
+                                      {row.attention.map((att, aIdx) => (
+                                        <span key={aIdx} className="attention-tag">
+                                          {att}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted" style={{ fontSize: '11px' }}>None (clean)</span>
+                                  )}
+                                </td>
+                                <td>
+                                  <button
+                                    className="btn btn-secondary btn-xs"
+                                    onClick={() => {
+                                      setShowReportModal(false);
+                                      onNavigateToReplyStudio(row.reply_id);
+                                    }}
+                                  >
+                                    <MessageSquare size={12} />
+                                    <span>Review</span>
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   )}
