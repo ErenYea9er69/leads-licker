@@ -1,5 +1,5 @@
 [project]
-name = "ai-customer-discovery"
+name = "leads-licker"
 version = "3.4.0"
 description = "A small AI company for customer discovery. You talk to the CEO. Specialists find people with the problem you solve in public communities and draft honest replies in your voice. Every output is verified. MCP server, CLI and API."
 readme = "README.md"
@@ -52,12 +52,12 @@ dashboard = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ErenYea9er69/AI-Customer-Discovery"
-Repository = "https://github.com/ErenYea9er69/AI-Customer-Discovery"
-Issues = "https://github.com/ErenYea9er69/AI-Customer-Discovery/issues"
+Homepage = "https://github.com/ErenYea9er69/leads-licker"
+Repository = "https://github.com/ErenYea9er69/leads-licker"
+Issues = "https://github.com/ErenYea9er69/leads-licker/issues"
 
 [project.scripts]
-ai-customer-discovery = "agent_reach.cli:main"
+leads-licker = "agent_reach.cli:main"
 agent-reach = "agent_reach.cli:main"
 
 [build-system]

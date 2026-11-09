@@ -1,19 +1,19 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.ErenYea9er69/ai-customer-discovery",
-  "title": "AI Customer Discovery",
+  "name": "io.github.ErenYea9er69/leads-licker",
+  "title": "Leads Licker",
   "description": "Find prospective customers in public communities and draft honest, verified replies in your voice.",
   "version": "3.4.0",
   "repository": {
-    "url": "https://github.com/ErenYea9er69/AI-Customer-Discovery",
+    "url": "https://github.com/ErenYea9er69/leads-licker",
     "source": "github"
   },
-  "websiteUrl": "https://github.com/ErenYea9er69/AI-Customer-Discovery",
+  "websiteUrl": "https://github.com/ErenYea9er69/leads-licker",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
-      "identifier": "ai-customer-discovery",
+      "identifier": "leads-licker",
       "version": "3.4.0",
       "runtimeHint": "uvx",
       "transport": {
@@ -28,4 +28,3 @@
     }
   ]
 }
-

@@ -1,6 +1,6 @@
 # Agent Reach
 
-<!-- mcp-name: io.github.ErenYea9er69/ai-customer-discovery -->
+<!-- mcp-name: io.github.ErenYea9er69/leads-licker -->
 
 [![Version](https://img.shields.io/badge/version-3.4.0-blue.svg)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
