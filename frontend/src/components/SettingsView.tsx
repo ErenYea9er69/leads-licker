@@ -18,6 +18,8 @@ import {
   Check,
   X,
   Info,
+  Copy,
+  Terminal,
 } from 'lucide-react';
 import type {
   PostingSettings,
@@ -29,7 +31,16 @@ import type {
 import { api } from '../api';
 
 export const SettingsView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'accounts' | 'connections' | 'safety' | 'ai_storage' | 'export'>('accounts');
+  const [activeTab, setActiveTab] = useState<
+    'accounts' | 'connections' | 'safety' | 'ai_storage' | 'mcp_ai' | 'export'
+  >('accounts');
+  const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedSnippet(id);
+    setTimeout(() => setCopiedSnippet(null), 2500);
+  };
 
   // Settings State
   const [postingSettings, setPostingSettings] = useState<PostingSettings>({
@@ -320,6 +331,14 @@ export const SettingsView: React.FC = () => {
         >
           <Cpu size={14} style={{ display: 'inline', marginRight: '6px' }} />
           AI & Storage Config
+        </button>
+        <button
+          type="button"
+          className={`version-tab ${activeTab === 'mcp_ai' ? 'active' : ''}`}
+          onClick={() => setActiveTab('mcp_ai')}
+        >
+          <Terminal size={14} style={{ display: 'inline', marginRight: '6px' }} />
+          AI Clients & MCP Integration
         </button>
         <button
           type="button"
@@ -1349,6 +1368,283 @@ export const SettingsView: React.FC = () => {
             </button>
           </div>
         </form>
+      )}
+
+      {/* ── TAB: AI CLIENTS & MCP INTEGRATION ── */}
+      {activeTab === 'mcp_ai' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-6)' }}>
+          {/* Header Card */}
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h2>Model Context Protocol (MCP) & AI Clients</h2>
+                <p>
+                  Connect Claude Desktop, Claude Code, Cursor, Windsurf, or Claude Web directly to Agent Reach.
+                  Tools share the exact same database, business profile, and verifiers.
+                </p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="badge badge-success">
+                  <CheckCircle2 size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                  MCP Server Active
+                </span>
+                <span className="badge badge-secondary">Transports: Stdio, SSE, HTTP</span>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gap: 'var(--sp-4)',
+                marginTop: 'var(--sp-4)',
+              }}
+            >
+              <div
+                className="card"
+                style={{
+                  padding: 'var(--sp-4)',
+                  background: 'var(--surface-subtle)',
+                  borderRadius: 'var(--r-md)',
+                }}
+              >
+                <strong style={{ display: 'block', marginBottom: '4px', fontSize: 'var(--fs-sm)' }}>
+                  Local Stdio Endpoint
+                </strong>
+                <code
+                  style={{
+                    fontSize: 'var(--fs-xs)',
+                    background: 'var(--surface)',
+                    padding: '4px 8px',
+                    borderRadius: 'var(--r-xs)',
+                    display: 'block',
+                  }}
+                >
+                  agent-reach mcp
+                </code>
+                <span
+                  style={{
+                    fontSize: 'var(--fs-xs)',
+                    color: 'var(--text-subtle)',
+                    marginTop: '6px',
+                    display: 'block',
+                  }}
+                >
+                  For Claude Desktop, Cursor, and terminal CLI clients.
+                </span>
+              </div>
+
+              <div
+                className="card"
+                style={{
+                  padding: 'var(--sp-4)',
+                  background: 'var(--surface-subtle)',
+                  borderRadius: 'var(--r-md)',
+                }}
+              >
+                <strong style={{ display: 'block', marginBottom: '4px', fontSize: 'var(--fs-sm)' }}>
+                  Integrated Remote SSE Endpoint
+                </strong>
+                <code
+                  style={{
+                    fontSize: 'var(--fs-xs)',
+                    background: 'var(--surface)',
+                    padding: '4px 8px',
+                    borderRadius: 'var(--r-xs)',
+                    display: 'block',
+                  }}
+                >
+                  http://127.0.0.1:8000/mcp/sse
+                </code>
+                <span
+                  style={{
+                    fontSize: 'var(--fs-xs)',
+                    color: 'var(--text-subtle)',
+                    marginTop: '6px',
+                    display: 'block',
+                  }}
+                >
+                  For Claude Web and remote network clients (with AGENT_REACH_API_KEY).
+                </span>
+              </div>
+            </div>
+          </section>
+
+          {/* Client Setup Cards */}
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h3>Client Configuration Guides</h3>
+                <p>Select your client below and paste the generated snippet into its configuration.</p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)', marginTop: 'var(--sp-4)' }}>
+              {/* Claude Desktop */}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-md)', padding: 'var(--sp-4)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
+                  <div>
+                    <strong style={{ fontSize: 'var(--fs-base)' }}>Claude Desktop</strong>
+                    <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-subtle)', marginLeft: '8px' }}>
+                      Add to %APPDATA%\Claude\claude_desktop_config.json
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() =>
+                      copyToClipboard(
+                        JSON.stringify(
+                          {
+                            mcpServers: {
+                              'agent-reach': {
+                                command: 'agent-reach',
+                                args: ['mcp'],
+                              },
+                            },
+                          },
+                          null,
+                          2
+                        ),
+                        'claude-desktop'
+                      )
+                    }
+                  >
+                    {copiedSnippet === 'claude-desktop' ? <Check size={14} /> : <Copy size={14} />}
+                    <span>{copiedSnippet === 'claude-desktop' ? 'Copied!' : 'Copy Config'}</span>
+                  </button>
+                </div>
+                <pre style={{ background: 'var(--surface-subtle)', padding: 'var(--sp-3)', borderRadius: 'var(--r-sm)', fontSize: 'var(--fs-xs)', overflowX: 'auto' }}>
+{`{
+  "mcpServers": {
+    "agent-reach": {
+      "command": "agent-reach",
+      "args": ["mcp"]
+    }
+  }
+}`}
+                </pre>
+              </div>
+
+              {/* Claude Code CLI */}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-md)', padding: 'var(--sp-4)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
+                  <div>
+                    <strong style={{ fontSize: 'var(--fs-base)' }}>Claude Code (CLI)</strong>
+                    <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-subtle)', marginLeft: '8px' }}>
+                      Run in your terminal to register the tool suite
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() =>
+                      copyToClipboard('claude mcp add agent-reach -- agent-reach mcp', 'claude-code')
+                    }
+                  >
+                    {copiedSnippet === 'claude-code' ? <Check size={14} /> : <Copy size={14} />}
+                    <span>{copiedSnippet === 'claude-code' ? 'Copied!' : 'Copy Command'}</span>
+                  </button>
+                </div>
+                <pre style={{ background: 'var(--surface-subtle)', padding: 'var(--sp-3)', borderRadius: 'var(--r-sm)', fontSize: 'var(--fs-xs)', overflowX: 'auto' }}>
+claude mcp add agent-reach -- agent-reach mcp
+                </pre>
+              </div>
+
+              {/* Cursor / Windsurf */}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-md)', padding: 'var(--sp-4)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
+                  <div>
+                    <strong style={{ fontSize: 'var(--fs-base)' }}>Cursor & Windsurf</strong>
+                    <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-subtle)', marginLeft: '8px' }}>
+                      Add to .cursor/mcp.json or Windsurf MCP Settings
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() =>
+                      copyToClipboard(
+                        JSON.stringify(
+                          {
+                            mcpServers: {
+                              'agent-reach': {
+                                command: 'agent-reach',
+                                args: ['mcp'],
+                              },
+                            },
+                          },
+                          null,
+                          2
+                        ),
+                        'cursor'
+                      )
+                    }
+                  >
+                    {copiedSnippet === 'cursor' ? <Check size={14} /> : <Copy size={14} />}
+                    <span>{copiedSnippet === 'cursor' ? 'Copied!' : 'Copy Config'}</span>
+                  </button>
+                </div>
+                <pre style={{ background: 'var(--surface-subtle)', padding: 'var(--sp-3)', borderRadius: 'var(--r-sm)', fontSize: 'var(--fs-xs)', overflowX: 'auto' }}>
+{`{
+  "mcpServers": {
+    "agent-reach": {
+      "command": "agent-reach",
+      "args": ["mcp"]
+    }
+  }
+}`}
+                </pre>
+              </div>
+
+              {/* Claude Web (Remote MCP) */}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-md)', padding: 'var(--sp-4)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
+                  <div>
+                    <strong style={{ fontSize: 'var(--fs-base)' }}>Claude Web (Remote MCP Server)</strong>
+                    <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-subtle)', marginLeft: '8px' }}>
+                      Connect over HTTP/SSE with bearer token authorization
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() =>
+                      copyToClipboard(
+                        JSON.stringify(
+                          {
+                            mcpServers: {
+                              'agent-reach-remote': {
+                                url: `http://127.0.0.1:8000/mcp/sse`,
+                                transport: 'sse',
+                              },
+                            },
+                          },
+                          null,
+                          2
+                        ),
+                        'claude-web'
+                      )
+                    }
+                  >
+                    {copiedSnippet === 'claude-web' ? <Check size={14} /> : <Copy size={14} />}
+                    <span>{copiedSnippet === 'claude-web' ? 'Copied!' : 'Copy Remote Config'}</span>
+                  </button>
+                </div>
+                <pre style={{ background: 'var(--surface-subtle)', padding: 'var(--sp-3)', borderRadius: 'var(--r-sm)', fontSize: 'var(--fs-xs)', overflowX: 'auto' }}>
+{`{
+  "mcpServers": {
+    "agent-reach-remote": {
+      "url": "http://127.0.0.1:8000/mcp/sse",
+      "transport": "sse"
+    }
+  }
+}`}
+                </pre>
+              </div>
+            </div>
+          </section>
+        </div>
       )}
 
       {/* ── TAB 5: DATA EXPORT ── */}

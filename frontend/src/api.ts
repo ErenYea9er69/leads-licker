@@ -488,4 +488,15 @@ export const api = {
       return await handleResponse<TeamRoster>(res);
     },
   },
+
+  // System Diagnostics & Multi-Mode
+  async getSystemStatus(): Promise<any> {
+    const res = await fetch(`${BASE_URL}/system/status`);
+    return await handleResponse<any>(res);
+  },
+
+  async getHealth(): Promise<any> {
+    const res = await fetch(`${BASE_URL}/health`);
+    return await handleResponse<any>(res);
+  },
 };

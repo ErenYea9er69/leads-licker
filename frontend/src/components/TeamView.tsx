@@ -27,6 +27,15 @@ import {
   ChevronUp,
   RotateCcw,
   Send,
+  Building2,
+  Compass,
+  Target,
+  PenTool,
+  CheckCheck,
+  TrendingUp,
+  Microscope,
+  UserCheck,
+  Bot,
 } from 'lucide-react';
 import type {
   DirectiveDetail,
@@ -46,17 +55,31 @@ interface TeamViewProps {
   onNavigateToProfile: () => void;
 }
 
-const roleIcons: Record<string, string> = {
-  analyst: '🏢',
-  scout: '🔍',
-  qualifier: '🎯',
-  writer: '✍️',
-  editor: '📝',
-  strategist: '📊',
-  researcher: '🔬',
-  follow_up: '🔄',
-  inspector: '🛡️',
-  owner: '👑',
+const renderRoleIcon = (role: string, size = 16) => {
+  switch (role) {
+    case 'analyst':
+      return <Building2 size={size} />;
+    case 'scout':
+      return <Compass size={size} />;
+    case 'qualifier':
+      return <Target size={size} />;
+    case 'writer':
+      return <PenTool size={size} />;
+    case 'editor':
+      return <CheckCheck size={size} />;
+    case 'strategist':
+      return <TrendingUp size={size} />;
+    case 'researcher':
+      return <Microscope size={size} />;
+    case 'follow_up':
+      return <RotateCcw size={size} />;
+    case 'inspector':
+      return <ShieldCheck size={size} />;
+    case 'owner':
+      return <UserCheck size={size} />;
+    default:
+      return <Bot size={size} />;
+  }
 };
 
 const intentLabels: Record<string, string> = {
@@ -988,7 +1011,7 @@ export const TeamView: React.FC<TeamViewProps> = ({
                         <div className="task-node-left">
                           <div className="task-step-number">{idx + 1}</div>
                           <div className="task-role-icon">
-                            {roleIcons[task.role] || '🤖'}
+                            {renderRoleIcon(task.role, 16)}
                           </div>
                           <div className="task-info">
                             <div className="task-title-line">
@@ -1345,7 +1368,7 @@ export const TeamView: React.FC<TeamViewProps> = ({
                   {roster?.roles.map((r) => (
                     <div key={r.name} className="specialist-card">
                       <div className="specialist-header">
-                        <span className="specialist-icon">{roleIcons[r.name] || '🤖'}</span>
+                        <span className="specialist-icon">{renderRoleIcon(r.name, 18)}</span>
                         <div>
                           <strong>{r.title}</strong>
                           <span className="specialist-name">@{r.name}</span>

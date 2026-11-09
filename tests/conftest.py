@@ -16,6 +16,19 @@ from agent_reach.team.toolbox import Toolbox, ToolDef, _def_from
 from agent_reach.team.verifier import Verifier
 
 
+@pytest.fixture(autouse=True)
+def isolate_ambient_provider_keys(monkeypatch: pytest.MonkeyPatch):
+    """Ensure host environment API keys do not leak into unit tests by default."""
+    for key in (
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GROQ_API_KEY",
+        "GEMINI_API_KEY",
+        "DEEPSEEK_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
 class FakeLLM:
     """A scripted model. Each call pops the next reply. A callable reply receives the prompt."""
 

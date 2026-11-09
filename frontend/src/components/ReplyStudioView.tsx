@@ -316,6 +316,30 @@ export const ReplyStudioView: React.FC<ReplyStudioViewProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const activeReport = useMemo<LintReport | null>(() => {
+    if (selectedVersion === 'custom') {
+      return liveLint || reply?.lint?.final || null;
+    }
+    if (selectedVersion === 'product_aware') {
+      return reply?.lint?.product_aware || null;
+    }
+    return reply?.lint?.value_first || null;
+  }, [selectedVersion, liveLint, reply]);
+
+  const issues: LintIssue[] = useMemo(() => {
+    if (!activeReport?.issues) return [];
+    return activeReport.issues.map((iss: any) => {
+      if (typeof iss === 'string') {
+        const isWarn = iss.toLowerCase().includes('warn') || iss.toLowerCase().includes('tip');
+        return { code: 'rule', severity: isWarn ? 'warn' : 'error', message: iss } as LintIssue;
+      }
+      return iss as LintIssue;
+    });
+  }, [activeReport]);
+
+  const errorIssues = issues.filter((i) => i.severity === 'error');
+  const warningIssues = issues.filter((i) => i.severity === 'warn');
+
   if (leads.length === 0) {
     return (
       <div className="page-shell">
@@ -347,30 +371,6 @@ export const ReplyStudioView: React.FC<ReplyStudioViewProps> = ({
   const maxWords = lead ? PLATFORM_MAX_WORDS[lead.platform] || 150 : 150;
   const isOverWordLimit = maxWords > 0 && wordCount > maxWords;
   const wordPercentage = maxWords > 0 ? Math.min(100, Math.round((wordCount / maxWords) * 100)) : 0;
-
-  const activeReport = useMemo<LintReport | null>(() => {
-    if (selectedVersion === 'custom') {
-      return liveLint || reply?.lint?.final || null;
-    }
-    if (selectedVersion === 'product_aware') {
-      return reply?.lint?.product_aware || null;
-    }
-    return reply?.lint?.value_first || null;
-  }, [selectedVersion, liveLint, reply]);
-
-  const issues: LintIssue[] = useMemo(() => {
-    if (!activeReport?.issues) return [];
-    return activeReport.issues.map((iss: any) => {
-      if (typeof iss === 'string') {
-        const isWarn = iss.toLowerCase().includes('warn') || iss.toLowerCase().includes('tip');
-        return { code: 'rule', severity: isWarn ? 'warn' : 'error', message: iss } as LintIssue;
-      }
-      return iss as LintIssue;
-    });
-  }, [activeReport]);
-
-  const errorIssues = issues.filter((i) => i.severity === 'error');
-  const warningIssues = issues.filter((i) => i.severity === 'warn');
 
   return (
     <div className="page-shell">

@@ -499,6 +499,23 @@ class DiscoveryStorage:
                 return LeadQualification.model_validate_json(row["data"])
         return None
 
+    def get_lead_by_url(self, url: str) -> Optional[LeadQualification]:
+        canon = canonical_url(url)
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT data FROM leads WHERE url = ? OR url = ?", (canon, url)
+            ).fetchone()
+            if row:
+                return LeadQualification.model_validate_json(row["data"])
+            item = self.get_discovered_item_by_url(url)
+            if item:
+                lead_row = conn.execute(
+                    "SELECT data FROM leads WHERE discovered_item_id = ?", (item.id,)
+                ).fetchone()
+                if lead_row:
+                    return LeadQualification.model_validate_json(lead_row["data"])
+        return None
+
     def list_leads(
         self,
         min_score: int = 0,
@@ -895,3 +912,14 @@ class DiscoveryStorage:
                 lead.evidence,
             )])
         return output.getvalue()
+
+    def backup(self, target_path: Path) -> Path:
+        """Create an online atomic backup of the database, safe during concurrent writes."""
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connection() as src_conn:
+            dest_conn = sqlite3.connect(str(target_path))
+            try:
+                src_conn.backup(dest_conn)
+            finally:
+                dest_conn.close()
+        return target_path

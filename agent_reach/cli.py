@@ -47,18 +47,88 @@ def _ensure_utf8_console() -> None:
         pass
 
 
+def _generate_mcp_config(target: str) -> int:
+    py_exec = sys.executable
+    target = target.strip().lower()
+    if target in ("claude-desktop", "desktop"):
+        cfg = {
+            "mcpServers": {
+                "agent-reach": {
+                    "command": py_exec,
+                    "args": ["-m", "agent_reach.cli", "mcp"],
+                }
+            }
+        }
+        print(json.dumps(cfg, indent=2))
+        return 0
+    if target in ("claude-code", "claude"):
+        print(f"claude mcp add agent-reach -- {py_exec} -m agent_reach.cli mcp")
+        return 0
+    if target in ("cursor", ".cursor"):
+        cfg = {
+            "mcpServers": {
+                "agent-reach": {
+                    "command": py_exec,
+                    "args": ["-m", "agent_reach.cli", "mcp"]
+                }
+            }
+        }
+        print(json.dumps(cfg, indent=2))
+        return 0
+    if target in ("windsurf", "codeium"):
+        cfg = {
+            "mcpServers": {
+                "agent-reach": {
+                    "command": py_exec,
+                    "args": ["-m", "agent_reach.cli", "mcp"]
+                }
+            }
+        }
+        print(json.dumps(cfg, indent=2))
+        return 0
+    if target in ("remote", "sse"):
+        cfg = {
+            "mcpServers": {
+                "agent-reach-remote": {
+                    "url": "http://127.0.0.1:8001/sse",
+                    "transport": "sse"
+                }
+            }
+        }
+        print(json.dumps(cfg, indent=2))
+        return 0
+    print(f"Unknown target: {target}. Supported targets: claude-desktop, claude-code, cursor, windsurf, remote.")
+    return 1
+
+
 def _cmd_mcp(args: Sequence[str]) -> int:
-    parser = argparse.ArgumentParser(prog="agent-reach mcp", description="Run the MCP server over stdio.")
+    if args and args[0] == "config":
+        target = args[1] if len(args) > 1 else "claude-desktop"
+        return _generate_mcp_config(target)
+
+    parser = argparse.ArgumentParser(prog="agent-reach mcp", description="Run the MCP server.")
     parser.add_argument(
         "--mode", choices=["company", "full"], default=None,
         help="company (default): the host talks to the CEO tools. full: every low level tool is visible too.",
+    )
+    parser.add_argument(
+        "--transport", choices=["stdio", "sse", "streamable-http"], default="stdio",
+        help="Transport protocol: stdio (default) for local clients, sse or streamable-http for remote/network.",
+    )
+    parser.add_argument(
+        "--host", default="127.0.0.1",
+        help="Host address to bind to for sse / streamable-http (default: 127.0.0.1).",
+    )
+    parser.add_argument(
+        "--port", type=int, default=8001,
+        help="Port number for sse / streamable-http (default: 8001).",
     )
     ns = parser.parse_args(list(args))
     from agent_reach.mcp import server
 
     if ns.mode:
         os.environ["AGENT_REACH_MCP_MODE"] = ns.mode
-    server.main()
+    server.main(transport=ns.transport, host=ns.host, port=ns.port, mode=ns.mode)
     return 0
 
 

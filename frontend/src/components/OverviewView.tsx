@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Target,
   Sparkles,
+  Users,
 } from 'lucide-react';
 import type { BusinessProfile, LeadQualification } from '../types';
 
@@ -91,7 +92,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
 
       <section className="overview-team-card">
         <div className="overview-team-left">
-          <div className="overview-team-icon">👑</div>
+          <div className="overview-team-icon">
+            <Users size={20} />
+          </div>
           <div className="overview-team-text">
             <h3>Autonomous CEO & Specialist Squad</h3>
             <p>

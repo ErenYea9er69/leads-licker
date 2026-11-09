@@ -44,6 +44,7 @@ def test_recreated_database_file_gets_a_fresh_idle_connection(tmp_path: Path):
     path = tmp_path / "c.db"
     st = DiscoveryStorage(path)
     st.set_setting("k", 1)
+    st.close()  # release idle connection before file removal (essential on Windows)
     for suffix in ("", "-wal", "-shm"):
         try:
             os.remove(str(path) + suffix)

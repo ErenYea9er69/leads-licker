@@ -67,27 +67,35 @@ _LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
 
 @app.middleware("http")
 async def api_security_middleware(request: Request, call_next):
-    """Guard every /api/ route.
+    """Guard every /api/ and /mcp route.
 
     With AGENT_REACH_API_KEY set, the key is required. With no key set, only
     loopback clients get in, so a server bound to 0.0.0.0 is never open by accident.
     """
-    if request.url.path.startswith("/api/"):
-        expected = os.getenv("AGENT_REACH_API_KEY")
+    if request.url.path.startswith(("/api/", "/mcp", "/sse")):
+        expected = os.getenv("AGENT_REACH_API_KEY") or os.getenv("MCP_AUTH_TOKEN")
         if expected:
             auth = request.headers.get("Authorization", "")
             bearer = auth[7:].strip() if auth.startswith("Bearer ") else ""
-            token = request.headers.get("X-API-Key") or bearer
+            query_token = request.query_params.get("token")
+            token = request.headers.get("X-API-Key") or bearer or query_token
             if not token or not hmac.compare_digest(token.encode(), expected.encode()):
                 return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key."})
         elif (request.client.host if request.client else "") in _LOOPBACK:
             origin = request.headers.get("origin")
-            if origin and origin not in allowed_origins:
+            if (
+                origin
+                and origin not in allowed_origins
+                and not origin.startswith(("chrome-extension://", "moz-extension://"))
+            ):
                 return JSONResponse(
                     status_code=403,
                     content={"detail": f"Cross-origin request from '{origin}' is forbidden."},
                 )
-            if request.headers.get("sec-fetch-site") == "cross-site":
+            if (
+                request.headers.get("sec-fetch-site") == "cross-site"
+                and not (origin and origin.startswith(("chrome-extension://", "moz-extension://")))
+            ):
                 return JSONResponse(
                     status_code=403,
                     content={"detail": "Cross-site requests to local API are forbidden."},
@@ -190,6 +198,53 @@ class UpdateSettingsRequest(BaseModel):
     llm_settings: Optional[Dict[str, Any]] = None
     mcp_settings: Optional[Dict[str, Any]] = None
 
+
+
+# ── Endpoints: System Health & Diagnostics ──
+
+@app.get("/api/health")
+def get_health():
+    """Liveness probe and system health."""
+    db_ok = False
+    try:
+        with storage._connection() as conn:
+            conn.execute("SELECT 1").fetchone()
+            db_ok = True
+    except Exception as exc:
+        log.warning("Healthcheck DB failure: %s", exc)
+
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "version": __version__,
+        "database": "connected" if db_ok else "disconnected",
+        "time": time.time(),
+    }
+
+
+@app.get("/api/system/status")
+def get_system_status():
+    """Complete diagnostic status of server, LLM, storage, and active workflows."""
+    profile = storage.get_latest_business_profile()
+    counts = storage.count_leads()
+    llm = orchestrator.llm
+    return {
+        "status": "ready",
+        "version": __version__,
+        "model": {
+            "provider": llm.provider or None,
+            "configured": llm.is_configured,
+            "mode": "server" if llm.is_configured else "host",
+        },
+        "profile": {
+            "name": profile.name if profile else None,
+            "url": profile.url if profile else None,
+            "confirmed": profile.confirmed if profile else False,
+        },
+        "lead_counts": counts,
+        "accounts_count": len(orchestrator.accounts.list()),
+        "mcp_mounted": True,
+        "mcp_endpoint": "/mcp/sse",
+    }
 
 
 # ── Endpoints: Business Profile ──
@@ -775,13 +830,31 @@ def team_intake_reset():
     return intake.describe(st)
 
 
+# ── Mount Integrated Remote MCP Server (SSE) ──
+
+try:
+    from agent_reach.mcp.server import create_mcp_server
+    _mcp_instance = create_mcp_server()
+    if hasattr(_mcp_instance, "settings") and hasattr(_mcp_instance.settings, "transport_security"):
+        _mcp_instance.settings.transport_security.allowed_hosts.extend(["*", "0.0.0.0:*", "127.0.0.1:*", "localhost:*", "testserver:*"])
+        _mcp_instance.settings.transport_security.allowed_origins.extend(["*", "http://localhost:*", "http://127.0.0.1:*"])
+    app.mount("/mcp", _mcp_instance.sse_app())
+except Exception as _mcp_mount_err:
+    log.warning("Could not mount MCP SSE app inside FastAPI: %s", _mcp_mount_err)
+
+
 # ── Serve Built Frontend if Present ──
 
 FRONTEND_DIST = (Path(__file__).resolve().parent.parent.parent / "frontend" / "dist").resolve()
 if FRONTEND_DIST.exists():
     @app.get("/{path:path}")
     def spa_fallback(path: str):
-        if path.startswith("api/"):
+        if (
+            path.startswith("api/")
+            or path.startswith("mcp/")
+            or path.startswith("sse/")
+            or path in ("docs", "redoc", "openapi.json")
+        ):
             raise HTTPException(status_code=404, detail="Not found")
         try:
             # Canonicalize and verify path stays strictly inside FRONTEND_DIST

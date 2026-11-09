@@ -1256,6 +1256,122 @@ def reach_control_dashboard(action: str = "status", port: int = 8000, host: str 
     return ensure_dashboard_running(port=port, host=host, open_browser=open_browser)
 
 
+# ── Browser Bridge & In-Situ Tools ──────────────────────────────────────────
+
+@mcp.tool(annotations=read_only("Browser companion status"))
+def reach_browser_status() -> Dict[str, Any]:
+    """Check status of browser companion bridge, linked accounts, and business profile."""
+    storage = get_storage()
+    profile = storage.get_latest_business_profile()
+    leads_count = storage.count_leads()
+    accounts = get_service().accounts.list()
+    return {
+        "status": "ready",
+        "companion_api": "/api/browser",
+        "profile_configured": profile is not None and profile.confirmed,
+        "product_name": profile.name if profile else None,
+        "lead_counts": leads_count,
+        "linked_accounts": [f"{a.platform}:{a.handle}" for a in accounts],
+        "extension_compatible": True,
+    }
+
+
+@mcp.tool(annotations=network("Capture thread from browser"))
+def reach_browser_capture(
+    url: str,
+    title: str = "",
+    content: str = "",
+    platform: str = "web",
+    community: str = "",
+    author: str = "",
+    auto_qualify: bool = True,
+) -> Dict[str, Any]:
+    """Ingest a thread captured in the user's browser, qualify it against the business profile, and generate drafts if qualified."""
+    storage = get_storage()
+    svc = get_service()
+    profile = storage.get_latest_business_profile()
+    if not profile:
+        return _err("No business profile configured. Run reach_analyze_business first.")
+
+    item = DiscoveredItem(
+        url=url,
+        platform=platform,
+        community=community or "web",
+        author=author or "unknown",
+        title=title,
+        content=content,
+        thread_health={"commentable": True, "source": "browser_extension"},
+    )
+    storage.save_discovered_item(item)
+
+    if not auto_qualify:
+        return {"ok": True, "item_id": item.id, "url": item.url, "qualified": False}
+
+    lead = svc.qualifier.qualify(item, profile)
+    if not lead:
+        return {
+            "ok": True,
+            "item_id": item.id,
+            "url": item.url,
+            "qualified": False,
+            "score": 0,
+            "message": "Thread does not match current business profile.",
+            "replies": [],
+        }
+
+    storage.save_lead(lead)
+    result: Dict[str, Any] = {
+        "ok": True,
+        "lead_id": lead.id,
+        "score": lead.score,
+        "classification": lead.classification,
+        "customer_problem": lead.customer_problem,
+        "buying_intent": lead.purchase_intent,
+        "replies": [],
+    }
+
+    if lead.score >= 50 and lead.classification != "irrelevant":
+        try:
+            replies = svc.reply_generator.generate_replies(lead, profile)
+            storage.save_reply(replies)
+            result["replies"] = [
+                {"version": "value_first", "text": replies.value_first},
+                {"version": "product_aware", "text": replies.product_aware},
+            ]
+        except Exception as exc:
+            result["reply_error"] = str(exc)
+
+    return result
+
+
+@mcp.tool(annotations=read_only("Prepare reply for browser injection"))
+def reach_browser_prepare_reply(url: str, version: str = "value_first") -> Dict[str, Any]:
+    """Look up an existing thread URL and return the approved or generated reply formatted for browser injection."""
+    storage = get_storage()
+    lead = storage.get_lead_by_url(url)
+    if not lead:
+        return _err(f"No lead found for URL: {url}")
+    reply = storage.get_reply_by_lead_id(lead.id)
+    if not reply:
+        return _err(f"No generated reply found for lead {lead.id}")
+
+    selected_text = (
+        reply.edited_reply
+        if reply.edited_reply
+        else (reply.product_aware if version == "product_aware" else reply.value_first)
+    )
+    return {
+        "lead_id": lead.id,
+        "url": lead.url,
+        "platform": lead.platform,
+        "score": lead.score,
+        "status": lead.status,
+        "version": version,
+        "text": selected_text,
+        "is_approved": reply.status == "approved",
+    }
+
+
 # ── Resources ─────────────────────────────────────────────────────────────────
 
 @mcp.resource("skill://{name}", mime_type="text/markdown", description="A skill's SKILL.md")
@@ -1277,15 +1393,37 @@ from agent_reach.mcp import team_tools  # noqa: E402,F401  (registers the ceo_* 
 
 
 def create_mcp_server(mode: Optional[str] = None) -> Any:
-    """Return the configured server instance. mode: company (default) or full."""
-    team_tools.apply_mode(mode)
+    """Return the configured server instance. mode: company or full."""
+    if mode is not None:
+        team_tools.apply_mode(mode)
     return mcp
 
 
-def main() -> None:
-    """Run the server over stdio."""
+def main(
+    transport: str = "stdio",
+    host: str = "127.0.0.1",
+    port: int = 8001,
+    mode: Optional[str] = None,
+) -> None:
+    """Run the server over stdio, sse, or streamable-http."""
     logging.basicConfig(level=os.getenv("AGENT_REACH_LOG", "WARNING"), stream=sys.stderr)
-    create_mcp_server().run(transport="stdio")
+    chosen_mode = mode or os.getenv("AGENT_REACH_MCP_MODE") or "company"
+    server_instance = create_mcp_server(chosen_mode)
+
+    chosen_transport = (os.getenv("AGENT_REACH_MCP_TRANSPORT") or transport).strip().lower()
+    chosen_host = os.getenv("AGENT_REACH_MCP_HOST") or host
+    try:
+        chosen_port = int(os.getenv("AGENT_REACH_MCP_PORT") or str(port))
+    except ValueError:
+        chosen_port = port
+
+    if chosen_transport in ("sse", "streamable-http"):
+        server_instance.settings.host = chosen_host
+        server_instance.settings.port = chosen_port
+        log.info(f"Starting Agent Reach MCP server ({chosen_transport}) on {chosen_host}:{chosen_port}")
+        server_instance.run(transport=chosen_transport)
+    else:
+        server_instance.run(transport="stdio")
 
 
 if __name__ == "__main__":
