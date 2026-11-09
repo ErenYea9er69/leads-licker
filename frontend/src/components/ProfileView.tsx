@@ -344,7 +344,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ profile, onProfileUpda
                 }}
               >
                 {profile.confirmed
-                  ? 'AgentReach uses this ICP model, negative filters, and pain vocabulary to search and score discussions.'
+                  ? 'Leads Licker uses this ICP model, negative filters, and pain vocabulary to search and score discussions.'
                   : 'Review the extracted ICP parameters, negative filters, and pain terms below, then click Confirm Profile to unlock discovery runs.'}
               </div>
             </div>

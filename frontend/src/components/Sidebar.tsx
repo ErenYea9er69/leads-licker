@@ -60,7 +60,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <Flame size={18} />
         </div>
         <div className="brand-text">
-          <div className="brand-title">AgentReach</div>
+          <div className="brand-title">Leads Licker</div>
           <div className="brand-subtitle">Customer Discovery</div>
         </div>
       </div>

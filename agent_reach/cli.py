@@ -19,15 +19,15 @@ from typing import List, Optional, Sequence
 
 from agent_reach import __version__
 
-HELP = """agent-reach: finds customers in public communities and drafts honest replies.
+HELP = """leads-licker: finds customers in public communities and drafts honest replies.
 
-  agent-reach mcp [--mode company|full]  run the MCP server over stdio (Claude, Cursor, VS Code, Antigravity)
-  agent-reach team <command>             talk to the CEO: ask, status, run, report, checkpoint, roster
-  agent-reach discovery <command>        step by step pipeline: profile, plan, search, leads, reply, lint, approve, post,
+  leads-licker mcp [--mode company|full]  run the MCP server over stdio (Claude, Cursor, VS Code, Antigravity)
+  leads-licker team <command>             talk to the CEO: ask, status, run, report, checkpoint, roster
+  leads-licker discovery <command>        step by step pipeline: profile, plan, search, leads, reply, lint, approve, post,
                                          confirm, voice, prefs, accounts, rules, posting, skills, check, export, analytics
-  agent-reach dashboard [--port N]       API for the dashboard (pip install "agent-reach[dashboard]")
-  agent-reach doctor                     check the install and the keys
-  agent-reach version
+  leads-licker dashboard [--port N]       API for the dashboard (pip install "leads-licker[dashboard]")
+  leads-licker doctor                     check the install and the keys
+  leads-licker version
 
 Output is JSON. Add -v for logs on stderr.
 """
@@ -203,7 +203,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         from agent_reach.discovery.cli import cmd_discovery
 
         sys.exit(cmd_discovery(rest))
-    print(json.dumps({"error": f"Unknown command: {head}", "hint": "Run `agent-reach help`."}))
+    print(json.dumps({"error": f"Unknown command: {head}", "hint": "Run `leads-licker help`."}))
     sys.exit(1)
 
 

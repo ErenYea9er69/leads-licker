@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Agent Reach MCP server.
+"""Leads Licker MCP server.
 
 The host AI does the reasoning. This server supplies what a model cannot do alone:
 public thread search, thread and comment reading, server-side scoring that cannot
@@ -55,7 +55,7 @@ from agent_reach.mcp.helpers import (
 log = logging.getLogger("agent_reach.mcp")
 
 INSTRUCTIONS = """\
-Agent Reach is a small company that finds people who have a problem the owner's product solves, in public communities, and drafts honest replies the owner posts from their own account.
+Leads Licker is a small company that finds people who have a problem the owner's product solves, in public communities, and drafts honest replies the owner posts from their own account.
 
 You are the CEO. The owner talks only to you. You do not do the specialists' work yourself.
 0. New owner, or a new product: call ceo_intake and interview the owner, one or two questions at a time. Pass each answer in the owner's own words. As soon as the product and the target users are known, the CEO starts the search in the background. Keep asking the questions in ask_next while it runs, and tell the owner what tell_owner says. Carry out actions_for_you. When ready_for_pipeline is true, call ceo_open_directive with suggested_request.
@@ -79,7 +79,7 @@ Rules that always apply:
 - Do not invent customers, results, numbers, links or personal stories. Write only from tool results and the owner's words.
 """
 
-mcp = make_server("AgentReach", INSTRUCTIONS)
+mcp = make_server("LeadsLicker", INSTRUCTIONS)
 
 _service: Optional[DiscoveryOrchestrator] = None
 _storage_instance: Optional[DiscoveryStorage] = None
@@ -1420,7 +1420,7 @@ def main(
     if chosen_transport in ("sse", "streamable-http"):
         server_instance.settings.host = chosen_host
         server_instance.settings.port = chosen_port
-        log.info(f"Starting Agent Reach MCP server ({chosen_transport}) on {chosen_host}:{chosen_port}")
+        log.info(f"Starting Leads Licker MCP server ({chosen_transport}) on {chosen_host}:{chosen_port}")
         server_instance.run(transport=chosen_transport)
     else:
         server_instance.run(transport="stdio")

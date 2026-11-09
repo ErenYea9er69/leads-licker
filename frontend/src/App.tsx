@@ -129,7 +129,7 @@ export const App: React.FC = () => {
       <main id="main-content" className="main-content">
         <header className="topbar">
           <div className="breadcrumb">
-            <span>AgentReach</span>
+            <span>Leads Licker</span>
             <span className="breadcrumb-separator">/</span>
             <strong>{pageTitles[currentTab]}</strong>
             {profile && <span className="workspace-chip">{profile.name}</span>}

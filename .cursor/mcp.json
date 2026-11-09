@@ -1,5 +1,6 @@
 {
   "mcpServers": {
+    "leads-licker": { "command": "leads-licker", "args": ["mcp"] },
     "agent-reach": { "command": "agent-reach", "args": ["mcp"] }
   }
 }

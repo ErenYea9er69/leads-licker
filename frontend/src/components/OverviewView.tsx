@@ -46,7 +46,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         <div>
           <h1>Turn public customer pain into conversations</h1>
           <p>
-            AgentReach finds problem-aware discussions, surfaces clear evidence, and helps you craft high-converting replies safely.
+            Leads Licker finds problem-aware discussions, surfaces clear evidence, and helps you craft high-converting replies safely.
           </p>
         </div>
         <div className="heading-actions">
@@ -71,7 +71,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           <AlertCircle size={20} />
           <div>
             <strong>Set up your business profile first</strong>
-            <span>AgentReach needs a confirmed product profile to match ICP and score buying signals.</span>
+            <span>Leads Licker needs a confirmed product profile to match ICP and score buying signals.</span>
           </div>
           <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('profile')}>
             Create profile
@@ -231,7 +231,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         <aside className="panel control-panel">
           <h2>Safe by Default</h2>
           <p style={{ marginTop: '6px', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', lineHeight: '1.5' }}>
-            AgentReach separates research, drafting, human approval, and publishing to ensure automated spam never occurs.
+            Leads Licker separates research, drafting, human approval, and publishing to ensure automated spam never occurs.
           </p>
 
           <div className="status-stack">

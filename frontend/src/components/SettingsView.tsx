@@ -465,7 +465,7 @@ export const SettingsView: React.FC = () => {
                 <Users size={28} style={{ color: 'var(--text-muted)', marginBottom: 'var(--sp-2)' }} />
                 <strong>No accounts linked yet</strong>
                 <span>
-                  Link at least one account so AgentReach can assess health, calculate karma safety limits, and draft personalized voice responses.
+                  Link at least one account so Leads Licker can assess health, calculate karma safety limits, and draft personalized voice responses.
                 </span>
                 <button
                   type="button"
@@ -1231,7 +1231,7 @@ export const SettingsView: React.FC = () => {
                   <Cpu size={18} style={{ color: 'var(--primary)' }} />
                   <h2>Model Context Protocol (MCP) & Host AI Controls</h2>
                 </div>
-                <p>Configure how AgentReach connects to IDEs and agents (Cursor, Claude Code, Antigravity, VS Code).</p>
+                <p>Configure how Leads Licker connects to IDEs and agents (Cursor, Claude Code, Antigravity, VS Code).</p>
               </div>
             </div>
 
@@ -1379,7 +1379,7 @@ export const SettingsView: React.FC = () => {
               <div>
                 <h2>Model Context Protocol (MCP) & AI Clients</h2>
                 <p>
-                  Connect Claude Desktop, Claude Code, Cursor, Windsurf, or Claude Web directly to Agent Reach.
+                  Connect Claude Desktop, Claude Code, Cursor, Windsurf, or Claude Web directly to Leads Licker.
                   Tools share the exact same database, business profile, and verifiers.
                 </p>
               </div>

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Agent Reach: a small AI company that finds customers in public communities."""
+"""Leads Licker: a small AI company that finds customers in public communities."""
 
 __version__ = "3.4.0"
 

@@ -277,6 +277,8 @@ class DiscoveryOrchestrator:
         self.storage.save_reply(reply, keep_others=keep_others)
         return reply
 
+    generate_reply = draft_for_lead
+
     def approve_reply(
         self, reply_id: str, edited_text: Optional[str] = None, selected_version: Optional[str] = None,
         force: bool = False,

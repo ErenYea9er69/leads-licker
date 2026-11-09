@@ -1,4 +1,4 @@
-# Agent Reach
+# Leads Licker
 
 <!-- mcp-name: io.github.ErenYea9er69/leads-licker -->
 
@@ -9,9 +9,9 @@
 [![FastAPI: 0.110+](https://img.shields.io/badge/FastAPI-0.110%2B-009688.svg)](https://fastapi.tiangolo.com)
 [![React: 19+](https://img.shields.io/badge/React-19-61dafb.svg)](frontend)
 
-**Agent Reach** is an autonomous AI customer discovery and community marketing platform. You talk to one person: the **CEO**. The CEO interprets your directive, drafts work orders for specialized AI agents (Analyst, Scout, Qualifier, Writer, Editor, Strategist, Researcher, Follow-up Tracker, Inspector), and enforces a deterministic verifier gate before any lead or reply is presented to you.
+**Leads Licker** is an autonomous AI customer discovery and community marketing platform. You talk to one person: the **CEO**. The CEO interprets your directive, drafts work orders for specialized AI agents (Analyst, Scout, Qualifier, Writer, Editor, Strategist, Researcher, Follow-up Tracker, Inspector), and enforces a deterministic verifier gate before any lead or reply is presented to you.
 
-Agent Reach can be used in whatever way fits your personal workflow: as a **standalone interactive web dashboard**, a **multi-transport MCP server** for Claude and Cursor, a **headless REST API**, or an **interactive terminal CLI**.
+Leads Licker can be used in whatever way fits your personal workflow: as a **standalone interactive web dashboard**, a **multi-transport MCP server** for Claude and Cursor, a **headless REST API**, or an **interactive terminal CLI**.
 
 ---
 
@@ -28,7 +28,7 @@ graph TD
         UI_IDE["Cursor / Windsurf<br/>(stdio / sse)"]
         UI_Remote["Claude Web / Cloud AI<br/>(Remote SSE)"]
         UI_REST["External REST API Clients<br/>(Curl / Python / Zapier)"]
-        UI_CLI["Terminal CLI<br/>(agent-reach team / discovery)"]
+        UI_CLI["Terminal CLI<br/>(leads-licker team / discovery)"]
     end
 
     subgraph Gateway["2. Gateway & Security Layer"]
@@ -124,18 +124,18 @@ sequenceDiagram
 
 ---
 
-## Choose Your Style: How to Use Agent Reach
+## Choose Your Style: How to Use Leads Licker
 
-Agent Reach supports **8 operating modes** to match your exact workflow. Pick the style that fits you:
+Leads Licker supports **8 operating modes** to match your exact workflow. Pick the style that fits you:
 
 | Style | Persona / Workflow | Interface | How to Launch |
 | :--- | :--- | :--- | :--- |
-| **Style 1** | **The Visual Founder** | Modern Web Dashboard | `agent-reach dashboard` |
-| **Style 2** | **The Terminal Specialist** | Autonomous CLI & Pipeline | `agent-reach team` / `agent-reach discovery` |
-| **Style 3** | **The Claude Desktop User** | Local Desktop AI Assistant | `agent-reach mcp` (stdio) |
-| **Style 4** | **The Claude Code Hacker** | CLI Terminal Coding Agent | `claude mcp add agent-reach` |
+| **Style 1** | **The Visual Founder** | Modern Web Dashboard | `leads-licker dashboard` |
+| **Style 2** | **The Terminal Specialist** | Autonomous CLI & Pipeline | `leads-licker team` / `leads-licker discovery` |
+| **Style 3** | **The Claude Desktop User** | Local Desktop AI Assistant | `leads-licker mcp` (stdio) |
+| **Style 4** | **The Claude Code Hacker** | CLI Terminal Coding Agent | `claude mcp add leads-licker` |
 | **Style 5** | **The REST API Integrator** | Headless Backend & Webhooks | FastAPI at `http://localhost:8000/docs` |
-| **Style 6** | **The Cloud / Remote AI User** | Remote Web MCP Client | `agent-reach mcp --transport sse` |
+| **Style 6** | **The Cloud / Remote AI User** | Remote Web MCP Client | `leads-licker mcp --transport sse` |
 | **Style 7** | **The IDE Copilot User** | Cursor & Windsurf IDE | `.cursor/mcp.json` configuration |
 
 ---
@@ -146,12 +146,12 @@ Agent Reach supports **8 operating modes** to match your exact workflow. Pick th
 
 1. **Install with dashboard support:**
    ```bash
-   pip install "agent-reach[dashboard]"
+   pip install "leads-licker[dashboard]"
    ```
 
 2. **Launch the server & web app:**
    ```bash
-   agent-reach dashboard --port 8000
+   leads-licker dashboard --port 8000
    ```
 
 3. **Open in your browser:**
@@ -177,16 +177,16 @@ The CEO manages the specialist squad automatically using your configured LLM (`A
 
 ```bash
 # 1. Ask the CEO to start a directive
-agent-reach team ask "Find customers for https://my-saas.com"
+leads-licker team ask "Find customers for https://my-saas.com"
 
 # 2. Check live progress across all tasks
-agent-reach team status
+leads-licker team status
 
 # 3. Approve checkpoints (e.g., profile confirmation)
-agent-reach team checkpoint <TASK_ID> approve --message "Target audience is accurate."
+leads-licker team checkpoint <TASK_ID> approve --message "Target audience is accurate."
 
 # 4. View verified executive report and lead cards
-agent-reach team report <DIRECTIVE_ID>
+leads-licker team report <DIRECTIVE_ID>
 ```
 
 #### Option B: Granular Step-by-Step Pipeline
@@ -194,40 +194,40 @@ Run discrete discovery stages individually with machine-readable JSON output:
 
 ```bash
 # Extract business profile from your landing page
-agent-reach discovery profile --url https://my-saas.com --confirm
+leads-licker discovery profile --url https://my-saas.com --confirm
 
 # Link your Reddit handle to calibrate your account karma and stage
-agent-reach discovery accounts link reddit:my_handle
+leads-licker discovery accounts link reddit:my_handle
 
 # Clone your authentic voice style from your historical posts
-agent-reach discovery voice --from-account reddit:my_handle
+leads-licker discovery voice --from-account reddit:my_handle
 
 # Set community self-promotion rules for target subreddits
-agent-reach discovery rules set r/saas --self-promo thread_only --ai-content no
+leads-licker discovery rules set r/saas --self-promo thread_only --ai-content no
 
 # Search communities for pain points and solution requests
-agent-reach discovery search --max 15 --communities r/saas,r/entrepreneur
+leads-licker discovery search --max 15 --communities r/saas,r/entrepreneur
 
 # Filter qualified leads by minimum score
-agent-reach discovery leads --min-score 70
+leads-licker discovery leads --min-score 70
 
 # Draft value-first and product-aware replies
-agent-reach discovery reply <LEAD_ID>
+leads-licker discovery reply <LEAD_ID>
 
 # Approve and get the direct link to post
-agent-reach discovery approve <REPLY_ID> --version value_first
-agent-reach discovery post <REPLY_ID>
+leads-licker discovery approve <REPLY_ID> --version value_first
+leads-licker discovery post <REPLY_ID>
 ```
 
 ---
 
 ### Style 3: The Claude Desktop User (Local MCP)
 
-*Best for users who want to converse with Claude Desktop and have Claude autonomously research leads, qualify threads, and draft replies using Agent Reach tools.*
+*Best for users who want to converse with Claude Desktop and have Claude autonomously research leads, qualify threads, and draft replies using Leads Licker tools.*
 
 1. **Generate the configuration snippet automatically:**
    ```bash
-   agent-reach mcp config claude-desktop
+   leads-licker mcp config claude-desktop
    ```
 
 2. **Add to your Claude Desktop config:**
@@ -237,8 +237,8 @@ agent-reach discovery post <REPLY_ID>
    ```json
    {
      "mcpServers": {
-       "agent-reach": {
-         "command": "agent-reach",
+       "leads-licker": {
+         "command": "leads-licker",
          "args": ["mcp"]
        }
      }
@@ -246,7 +246,7 @@ agent-reach discovery post <REPLY_ID>
    ```
 
 3. **Restart Claude Desktop and ask:**
-   > *"Use Agent Reach to discover customers for https://my-site.com on Reddit and Hacker News."*
+   > *"Use Leads Licker to discover customers for https://my-site.com on Reddit and Hacker News."*
 
 *Claude will interact with the 13 CEO tools in Company Mode, delegating work to specialists and presenting verified lead cards directly inside your chat.*
 
@@ -256,32 +256,32 @@ agent-reach discovery post <REPLY_ID>
 
 *Best for developers utilizing Anthropic's Claude Code CLI who want agentic customer discovery natively in their coding terminal.*
 
-1. **Register Agent Reach with Claude Code in one command:**
+1. **Register Leads Licker with Claude Code in one command:**
    ```bash
-   claude mcp add agent-reach -- agent-reach mcp
+   claude mcp add leads-licker -- leads-licker mcp
    ```
 
 2. **Or print the command using the CLI helper:**
    ```bash
-   agent-reach mcp config claude-code
+   leads-licker mcp config claude-code
    ```
 
 3. **In Claude Code:**
    ```
    > /mcp
-   > Use Agent Reach to analyze competitors for https://my-saas.com and draft community replies
+   > Use Leads Licker to analyze competitors for https://my-saas.com and draft community replies
    ```
 
 ---
 
 ### Style 5: The Headless REST API Integrator
 
-*Best for backend engineers connecting Agent Reach to custom CRMs, internal admin portals, Zapier, or Slack bots.*
+*Best for backend engineers connecting Leads Licker to custom CRMs, internal admin portals, Zapier, or Slack bots.*
 
 1. **Start the API server (optionally set `AGENT_REACH_API_KEY` for bearer authentication):**
    ```bash
    export AGENT_REACH_API_KEY="sk_live_secret_key_123"
-   agent-reach dashboard --port 8000 --host 0.0.0.0
+   leads-licker dashboard --port 8000 --host 0.0.0.0
    ```
 
 2. **Explore the Interactive Swagger API Docs:**
@@ -317,19 +317,19 @@ agent-reach discovery post <REPLY_ID>
 
 1. **Option A: Run unified (Dashboard + Remote MCP on port 8000):**
    ```bash
-   agent-reach dashboard --port 8000 --host 0.0.0.0
+   leads-licker dashboard --port 8000 --host 0.0.0.0
    ```
    *Your Remote MCP endpoint is immediately live at:*
    `https://your-server-domain.com/mcp/sse`
 
 2. **Option B: Run a dedicated standalone SSE MCP Server:**
    ```bash
-   agent-reach mcp --transport sse --host 0.0.0.0 --port 8001
+   leads-licker mcp --transport sse --host 0.0.0.0 --port 8001
    ```
 
 3. **Inspect the remote configuration format:**
    ```bash
-   agent-reach mcp config remote --url https://your-server-domain.com/mcp/sse
+   leads-licker mcp config remote --url https://your-server-domain.com/mcp/sse
    ```
 
 ---
@@ -340,17 +340,17 @@ agent-reach discovery post <REPLY_ID>
 
 1. **Generate the configuration snippet:**
    ```bash
-   agent-reach mcp config cursor
+   leads-licker mcp config cursor
    # or
-   agent-reach mcp config windsurf
+   leads-licker mcp config windsurf
    ```
 
 2. **Add to `.cursor/mcp.json` in your project root:**
    ```json
    {
      "mcpServers": {
-       "agent-reach": {
-         "command": "agent-reach",
+       "leads-licker": {
+         "command": "leads-licker",
          "args": ["mcp"]
        }
      }
@@ -358,7 +358,7 @@ agent-reach discovery post <REPLY_ID>
    ```
 
 3. **In Cursor Composer / Agent:**
-   > *"Run an Agent Reach customer discovery pass on our new pricing model and check what users on r/SaaS complain about."*
+   > *"Run a Leads Licker customer discovery pass on our new pricing model and check what users on r/SaaS complain about."*
 
 ---
 
@@ -418,7 +418,7 @@ Every specialist is bound to a strict role charter and scoped toolset:
 
 ## Account Health & Platform Safety
 
-Agent Reach is built around sustainable community participation. It strictly enforces a 4-tier account ladder to protect your online reputation:
+Leads Licker is built around sustainable community participation. It strictly enforces a 4-tier account ladder to protect your online reputation:
 
 | Account Tier | Minimum Requirements | Maximum Allowed Pitch Level | Permitted Actions |
 | :--- | :--- | :--- | :--- |

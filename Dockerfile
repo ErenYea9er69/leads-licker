@@ -12,6 +12,6 @@ RUN pip install . && useradd --create-home reach && mkdir /data && chown reach /
 USER reach
 VOLUME ["/data"]
 
-# stdio MCP server by default. Use: docker run -i --rm -v reach-data:/data agent-reach mcp
-ENTRYPOINT ["agent-reach"]
+# stdio MCP server by default. Use: docker run -i --rm -v reach-data:/data leads-licker mcp
+ENTRYPOINT ["leads-licker"]
 CMD ["mcp"]

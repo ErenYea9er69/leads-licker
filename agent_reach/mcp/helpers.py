@@ -47,7 +47,7 @@ def generate_markdown_report(
     """Generate a clean, structured Markdown customer discovery report."""
     now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines: List[str] = [
-        "# Agent Reach: Customer Discovery Report",
+        "# Leads Licker: Customer Discovery Report",
         f"\n*Generated on {now_str}*",
         "",
     ]

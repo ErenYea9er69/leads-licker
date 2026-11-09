@@ -36,7 +36,7 @@ from agent_reach.team.intake import Intake
 log = logging.getLogger("agent_reach.server")
 
 app = FastAPI(
-    title="Agent Reach - Customer Discovery & Lead Intelligence API",
+    title="Leads Licker - Customer Discovery & Lead Intelligence API",
     version=__version__,
 )
 
@@ -430,7 +430,7 @@ def generate_reply(lead_id: str, request: Request, req: Optional[GenerateReplyRe
     if not profile:
         raise HTTPException(status_code=400, detail="Business profile required to generate replies.")
     try:
-        reply = orchestrator.generate_reply(
+        reply = orchestrator.draft_for_lead(
             lead,
             profile=profile,
             account=req.account if req and req.account else "",
