@@ -288,6 +288,39 @@ Arguments:
 - `edited_text` (string, default '')
 - `force` (boolean, default False)
 
+## reach_browser_capture
+
+Effect: reads public pages and writes locally.
+
+Ingest a thread captured in the user's browser, qualify it against the business profile, and generate drafts if qualified.
+
+Arguments:
+
+- `url` (string, required)
+- `title` (string, default '')
+- `content` (string, default '')
+- `platform` (string, default 'web')
+- `community` (string, default '')
+- `author` (string, default '')
+- `auto_qualify` (boolean, default True)
+
+## reach_browser_prepare_reply
+
+Effect: reads only.
+
+Look up an existing thread URL and return the approved or generated reply formatted for browser injection.
+
+Arguments:
+
+- `url` (string, required)
+- `version` (string, default 'value_first')
+
+## reach_browser_status
+
+Effect: reads only.
+
+Check status of browser companion bridge, linked accounts, and business profile.
+
 ## reach_confirm_posted
 
 Effect: writes locally.

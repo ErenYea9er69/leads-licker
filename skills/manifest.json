@@ -1,6 +1,6 @@
 {
   "pack_version": "1.0.0",
-  "sha256": "dfa6c5b8d5b10fb4ff05c651a1da6566c9aa1fa5de6bc2cd32054766e3159d17",
+  "sha256": "d2654041d98a7387141fa348bd330852bb77ea3c6243aaed3738029b0beadb41",
   "skills": [
     {
       "description": "How the CEO runs the team: plan a directive, hand work to specialists, verify every output, stop at owner checkpoints and report only verified work. Load it first when the owner makes any request.",
@@ -9,7 +9,7 @@
       "references": [
         "references/verification-rules.md"
       ],
-      "sha256": "43287684db4dc1e14ab8dc6d7881bce1168060d24e72bdf46c3e55c0d6031386",
+      "sha256": "ba2eb15e0e966cf9f205f25bfcae434f0273b60250489ec0a1033b99d4c3f0ae",
       "stage": "router",
       "used_by": [
         "mcp",
@@ -26,7 +26,7 @@
         "references/pipeline-workflow.md",
         "references/tool-reference.md"
       ],
-      "sha256": "230f3590e5d04ff029cfc2f7603ed640a12bea4b3cf3d7a391286a0b446cafc4",
+      "sha256": "e0d490612bbd06141bc9af2ce98a4216365953f0c8cb769d7037e12b4c1d5d06",
       "stage": "router",
       "used_by": [
         "pipeline",
@@ -43,7 +43,7 @@
         "references/icp-framework.md",
         "references/pain-vocabulary.md"
       ],
-      "sha256": "b1e2b177c48ba9f9a8cf12e3e80fc0e4da151126cfd5b89357f3fbfef2674088",
+      "sha256": "90b904d9caf3a16b088fb3e3e29abd2313609cd73b291a5c5c605237ee12890b",
       "stage": "profile",
       "used_by": [
         "pipeline",
@@ -60,7 +60,7 @@
         "references/query-patterns.md",
         "references/subreddit-selection.md"
       ],
-      "sha256": "790dfc090dd1cf198fab176056883cc3590b99b95a11ff037d644013b8c91c33",
+      "sha256": "1a1ffdfbb8766a140083380297f559b58341ed4b3ddcc6330af5c81fdd21fc5a",
       "stage": "search",
       "used_by": [
         "pipeline",
@@ -76,7 +76,7 @@
         "references/rubric.md",
         "references/calibration-examples.md"
       ],
-      "sha256": "e8255eee16dfed8e75edeceaa3d120eebcc4bf6907922ed39ca528f1672ad9ad",
+      "sha256": "e2cfcca00e6561270085adf62799b7064d1b7cd87e3b19270b51e91c6065d6d0",
       "stage": "qualify",
       "used_by": [
         "pipeline",
@@ -93,7 +93,7 @@
         "references/reply-types.md",
         "references/handling-responses.md"
       ],
-      "sha256": "1b16af148c34c39e2d9bebc4981d9b84c9f7c27f73ab668cbbcaf1c59ead7066",
+      "sha256": "74149abac7830ddf68d480a296d16d3ff6afa6bd7c866064400cd9a51be499ec",
       "stage": "engage",
       "used_by": [
         "pipeline",
@@ -115,7 +115,7 @@
         "references/banned-ai-tells.txt",
         "references/banned-user-list.txt"
       ],
-      "sha256": "642f787f1759344fe76d2410a61e8cbefd583536954cfe0c048a0af753aaa1d9",
+      "sha256": "19f0c322059608bc45496bd9c6ffe5fa839b3ba0cfeb6ce4edf83eeecac773fa",
       "stage": "write",
       "used_by": [
         "pipeline",
@@ -136,7 +136,7 @@
         "references/ftc-disclosure.md",
         "references/warmup-plan.md"
       ],
-      "sha256": "3234a69d0da4a5c5a729b845c71e88d69704605afdc157bcaf91cc9ec3795e4f",
+      "sha256": "6dbca28d839e9de6bd3799fae1cac9cc824e3aa2fa40e5baf624347d0e7903f6",
       "stage": "safety",
       "used_by": [
         "pipeline",

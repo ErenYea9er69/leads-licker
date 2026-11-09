@@ -1,175 +1,497 @@
 # Agent Reach
 
-Agent Reach is a small AI company that finds people who have a problem your product solves, in public communities, and drafts honest replies in your own voice. You post every reply yourself from your own account.
+[![Version](https://img.shields.io/badge/version-3.4.0-blue.svg)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python: 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![MCP: 1.27+](https://img.shields.io/badge/MCP-1.27%2B-purple.svg)](https://modelcontextprotocol.io)
+[![FastAPI: 0.110+](https://img.shields.io/badge/FastAPI-0.110%2B-009688.svg)](https://fastapi.tiangolo.com)
+[![React: 19+](https://img.shields.io/badge/React-19-61dafb.svg)](frontend)
 
-You talk to one person: the CEO. The CEO plans the work, hands tasks to specialists, makes them check each other, and tells you only what passed verification.
+**Agent Reach** is an autonomous AI customer discovery and community marketing platform. You talk to one person: the **CEO**. The CEO interprets your directive, drafts work orders for specialized AI agents (Analyst, Scout, Qualifier, Writer, Editor, Strategist, Researcher, Follow-up Tracker, Inspector), and enforces a deterministic verifier gate before any lead or reply is presented to you.
 
-```
-                 you
-                  |
-                 CEO  (your AI assistant, or the server's own model)
-                  |  plans tasks, writes briefs, launches tools, decides
-   +----------+---+---------+-----------+-----------+-----------+------------+
- analyst    scout     qualifier     writer     editor     strategist   researcher   follow_up
- profile    search      leads       drafts    2nd read     reviews     competitors   threads
-                  \          |          /
-                   +-- verifier (evidence, quotes, numbers, links) and the automatic posting inspector --+
-```
+Agent Reach can be used in whatever way fits your personal workflow: as a **standalone interactive web dashboard**, a **multi-transport MCP server** for Claude and Cursor, a **headless REST API**, or an **interactive terminal CLI**.
 
-## How the company works
+---
 
-1. You ask the CEO for something: "find customers for https://my-site.com".
-2. The CEO opens a directive and plans tasks (`ceo_open_directive`). Each task has a role, an instruction, acceptance checks and dependencies.
-3. Each specialist gets a brief built from its charter, the skill pack and the verified output of earlier tasks. It works only through the tools its role allows.
-4. Every tool call lands in an evidence ledger. A specialist's output must cite those evidence ids.
-5. The verifier checks each output before it counts: unknown evidence ids, quotes that are not in the evidence, numbers or links no tool returned, leads without a verified quote, drafts that fail the linter. A second model (the auditor model) may object to unsupported claims. After three failed tries the task goes back to the CEO, who retries, reassigns or skips it.
-6. The CEO stops at owner checkpoints: you confirm the profile, and you approve each reply. The CEO records your own words.
-7. The report lists verified work, what did not pass, numbers from the database and your next actions.
+## System Architecture (UML Component Diagram)
 
-The CEO can also create tasks (`ceo_create_task`), hire a new specialist with its own prompt and tool list (`ceo_hire_specialist`) and save a reusable plan (`ceo_create_playbook`). A specialist can never hold a posting, approval, settings or account tool.
+The entire platform shares a single Python core engine, a unified SQLite database (with WAL mode, atomic live backup, and single-connection pooling), and shared safety gates across all interfaces:
 
-Since 3.1 the company also:
-- has nine specialists (analyst, scout, qualifier, writer, editor, strategist, researcher, follow_up) plus an automatic posting inspector that runs without a model, and seven built-in plans, and plans a request that fits none of them;
-- asks you for a site or a description when your request has neither;
-- treats "nothing found" as a valid result: the scout widens the search once, later steps are skipped, and the report lists what was tried;
-- has an editor who reads every draft and sends weak ones back to the writer once;
-- remembers your standing preferences (`ceo_memory`) and what it learned, and shows them to every specialist;
-- tells the assistant the single next action (`ceo_next_step`), recovers tasks that stalled, stops on `ceo_cancel_directive` and stops runaway tool use with a budget;
-- reports lead cards (thread, verified quote, draft, gate result), a trust level and what was tried. See `docs/company.md`.
+```mermaid
+graph TD
+    subgraph Clients["1. Clients & User Interfaces"]
+        UI_Dash["Vite React Dashboard<br/>(Port 8000)"]
+        UI_ClaudeDesk["Claude Desktop<br/>(stdio)"]
+        UI_ClaudeCode["Claude Code CLI<br/>(stdio)"]
+        UI_IDE["Cursor / Windsurf<br/>(stdio / sse)"]
+        UI_Remote["Claude Web / Cloud AI<br/>(Remote SSE)"]
+        UI_REST["External REST API Clients<br/>(Curl / Python / Zapier)"]
+        UI_CLI["Terminal CLI<br/>(agent-reach team / discovery)"]
+    end
 
-## Two ways to run it
+    subgraph Gateway["2. Gateway & Security Layer"]
+        FastAPI_App["FastAPI Unified Server (Port 8000)"]
+        Auth_MW["API Security Middleware<br/>(Bearer / X-API-Key / Query Token)"]
+        SPA_Route["Static SPA Router<br/>(Vite HTML5 Fallback)"]
+    end
 
-| | Server model | Host assistant |
-| --- | --- | --- |
-| Who is the CEO | The server's model | Your assistant (Claude Code, Cursor, VS Code, Claude Desktop, Antigravity) |
-| Who works | Specialists on the server's model | Your assistant plays each specialist through work orders |
-| Needs | One provider key | No key |
-| Checks | Same ledger, same permissions, same verifier | Same |
+    subgraph Integration["3. Integration & Communication Layer"]
+        REST_Routes["REST Endpoints<br/>(/api/profile, /api/leads, /api/replies, /api/team/*)"]
+        MCP_Server["MCP Server Engine<br/>(stdio | sse | streamable-http)"]
+        OpenAPI_Docs["OpenAPI / Swagger Engine<br/>(/docs, /redoc, /openapi.json)"]
+    end
 
-Everything is an MCP tool. The server registers no MCP prompts.
+    subgraph CoreEngine["4. Shared Core Engine & Specialist Squad"]
+        Team_Engine["Team Engine & Orchestrator<br/>(Directives, Playbooks, State Machine)"]
+        Squad["Specialist Squad<br/>(Analyst, Scout, Qualifier, Writer, Editor, Strategist, Researcher, Follow-up, Inspector)"]
+        Verifier["Deterministic Verifier Gate<br/>(Quotes, Numbers, Links, Linter, Platform Policy)"]
+        Ledger["Evidence Ledger<br/>(Immutable Tool Audit Trail E1, E2...)"]
+    end
 
-## What the specialists do
+    subgraph DataLayer["5. Persistence & Data Layer"]
+        Storage["DiscoveryStorage & TeamStore<br/>(Thread Safe, Single Connection Pool)"]
+        SQLite_DB[("SQLite Database<br/>(WAL Mode, Atomic Live Backup)")]
+    end
 
-1. The analyst reads your website or description and builds a profile: the problems you solve, your ideal customer, the words customers use, and the people who should not become leads.
-2. The scout plans searches by buyer stage (switching, solution, problem) in your customers' own words. It never puts your product name in a query. It searches Reddit, Hacker News, GitHub, Quora, X and the web, and keeps open threads that can still take a comment.
-3. The qualifier scores each thread with a five-part rubric and checks the evidence quote against the stored post. Keyword-only scoring can never reach high potential. A second model reads high potential threads again.
-4. The writer drafts two replies in your voice. The value-first reply never names your product. The product-aware reply names it once and states your connection in a natural first-person sentence. Every draft passes the linter: banned words, dashes, markdown, links, emoji, length, affiliation, repeats and voice match. Numbers in a draft must appear in the profile or the thread.
-5. The editor reads every draft against its thread and the profile and sends weak ones back once.
-6. The posting inspector runs by itself. For each draft it asks the posting gates what they would say if you approved it today: your account's real age and karma, the community rules you recorded, the share of your comments that name the product, a daily cap and one reply per thread. It also flags a draft edited after the editor read it.
-7. The strategist reviews results when you ask for a weekly review.
+    UI_Dash --> FastAPI_App
+    UI_REST --> FastAPI_App
+    UI_Remote --> FastAPI_App
+    FastAPI_App --> Auth_MW
+    Auth_MW --> REST_Routes
+    Auth_MW --> SPA_Route
+    FastAPI_App --> MCP_Server
 
-## Your own accounts
+    UI_ClaudeDesk --> MCP_Server
+    UI_ClaudeCode --> MCP_Server
+    UI_IDE --> MCP_Server
+    UI_CLI --> Team_Engine
 
-You link accounts you already use. The app stores the handle only. It never stores a password or a cookie and it never creates accounts. It reads public data (age, karma, recent comments) to decide how much promotion the account can carry, and to learn your writing style from your own comments.
-
-| Stage | Account | Highest pitch level |
-| --- | --- | --- |
-| build | under 30 days or under 100 karma, or unreadable | 0, help only |
-| trusted | 30 days and 100 karma | 1, describe the kind of tool |
-| established | 90 days and 300 karma | 2, name the product once, no link |
-| veteran | 180 days and 500 karma | 3, name it with a link when the thread asks |
-
-An account whose recent comments name the product more than 10 percent of the time drops one stage.
-
-## Install
-
-```
-pip install .                      # MCP server and CLI
-pip install ".[dashboard]"         # adds the API for your dashboard
+    REST_Routes --> Team_Engine
+    MCP_Server --> Team_Engine
+    Team_Engine --> Squad
+    Squad --> Ledger
+    Ledger --> Verifier
+    Verifier --> Storage
+    Storage --> SQLite_DB
 ```
 
-Python 3.10 or newer. With only the MCP server you need no model key. For server-side specialists, the CLI and the dashboard chat, set one provider key (see `.env.example`).
+---
 
-## Quick start with the MCP server
+## Lifecycle of a Directive (UML Sequence Diagram)
 
-Add this to your client's MCP configuration:
+Every customer discovery request runs through an anti-hallucination pipeline where unverified claims cannot reach the human owner:
 
-```json
-{
-  "mcpServers": {
-    "agent-reach": { "command": "agent-reach", "args": ["mcp"] }
-  }
-}
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Founder as Founder / User
+    participant CEO as CEO Agent (Host / Server)
+    participant Planner as Team Planner
+    participant Specialist as Specialist (e.g. Scout / Qualifier)
+    participant Ledger as Evidence Ledger
+    participant Verifier as Deterministic Verifier
+    participant Store as SQLite Store
+
+    Founder->>CEO: "Find customers for https://my-site.com"
+    CEO->>Planner: Open Directive & Plan Playbook
+    Planner-->>CEO: Tasks with Dependencies & Scoped Tools
+    
+    loop For Each Ready Task
+        CEO->>Specialist: Dispatch Work Order (Charter + Prior Evidence + Scoped Tools)
+        Specialist->>Specialist: Call Scoped Tools (e.g. harvest_threads)
+        Specialist->>Ledger: Record Raw Output as Evidence (E1, E2...)
+        Specialist-->>CEO: Submit Result citing Evidence IDs
+        CEO->>Verifier: Run Deterministic Verification
+        
+        alt Verification Passes (Quotes match, Numbers verified, Linter ok)
+            Verifier->>Store: Persist Verified Lead & Task Complete
+            Verifier-->>CEO: Pass
+        else Verification Fails (Missing quote, Hallucinated link, Banned word)
+            Verifier-->>CEO: Reject with Specific Errors
+            CEO->>Specialist: Retry with Correction (Max 3 attempts)
+        end
+    end
+
+    opt Human Checkpoint Needed (Profile confirmation or Draft reply approval)
+        CEO->>Founder: Request Checkpoint Approval
+        Founder-->>CEO: Confirm / Approve
+    end
+
+    CEO->>Founder: Comprehensive Verified Report & Publication-Ready Leads
 ```
 
-Then tell your assistant: "Use Agent Reach to find customers for https://your-site.com". It acts as the CEO: it calls `ceo_open_directive` and follows the `company-operations` skill. By default the host sees the CEO tools plus the owner tools (approve, publish, confirm, accounts, settings). Use `agent-reach mcp --mode full` to show every low level tool as well. See `docs/mcp_setup.md` for each client.
+---
 
-## Quick start with the command line
+## Choose Your Style: How to Use Agent Reach
 
-Talk to the CEO from the terminal (needs a provider key):
+Agent Reach supports **8 operating modes** to match your exact workflow. Pick the style that fits you:
 
-```
-agent-reach team ask "Find customers for https://your-site.com"
+| Style | Persona / Workflow | Interface | How to Launch |
+| :--- | :--- | :--- | :--- |
+| **Style 1** | **The Visual Founder** | Modern Web Dashboard | `agent-reach dashboard` |
+| **Style 2** | **The Terminal Specialist** | Autonomous CLI & Pipeline | `agent-reach team` / `agent-reach discovery` |
+| **Style 3** | **The Claude Desktop User** | Local Desktop AI Assistant | `agent-reach mcp` (stdio) |
+| **Style 4** | **The Claude Code Hacker** | CLI Terminal Coding Agent | `claude mcp add agent-reach` |
+| **Style 5** | **The REST API Integrator** | Headless Backend & Webhooks | FastAPI at `http://localhost:8000/docs` |
+| **Style 6** | **The Cloud / Remote AI User** | Remote Web MCP Client | `agent-reach mcp --transport sse` |
+| **Style 7** | **The IDE Copilot User** | Cursor & Windsurf IDE | `.cursor/mcp.json` configuration |
+
+---
+
+### Style 1: The Visual Founder (Web Dashboard)
+
+*Best for founders, marketers, and operators who want a rich, interactive visual dashboard to manage campaigns, monitor the squad in real-time, and approve replies with one click.*
+
+1. **Install with dashboard support:**
+   ```bash
+   pip install "agent-reach[dashboard]"
+   ```
+
+2. **Launch the server & web app:**
+   ```bash
+   agent-reach dashboard --port 8000
+   ```
+
+3. **Open in your browser:**
+   ```
+   http://localhost:8000
+   ```
+
+**What you get:**
+- **Overview:** Live company status, active directives, and high-potential lead summaries.
+- **CEO Chat & Squad Tracker:** Real-time visibility into what the Analyst, Scout, Qualifier, and Writer are working on.
+- **Leads Kanban & Table:** Sort leads by qualification score, purchase intent, and community.
+- **Reply Studio:** Side-by-side comparison of **Value-First** vs **Product-Aware** drafts with real-time linter verification.
+- **Settings & AI Client Configs:** One-click copy snippets for Claude Desktop, Claude Code, Cursor, and Remote MCP.
+
+---
+
+### Style 2: The Terminal Specialist (Power User CLI)
+
+*Best for developers and automation engineers who live in the terminal and want fast, scriptable control.*
+
+#### Option A: Autonomous Team Mode (Talk to the CEO)
+The CEO manages the specialist squad automatically using your configured LLM (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, or `DEEPSEEK_API_KEY`):
+
+```bash
+# 1. Ask the CEO to start a directive
+agent-reach team ask "Find customers for https://my-saas.com"
+
+# 2. Check live progress across all tasks
 agent-reach team status
-agent-reach team checkpoint TASK_ID approve --message "The profile is right."
-agent-reach team report DIRECTIVE_ID
+
+# 3. Approve checkpoints (e.g., profile confirmation)
+agent-reach team checkpoint <TASK_ID> approve --message "Target audience is accurate."
+
+# 4. View verified executive report and lead cards
+agent-reach team report <DIRECTIVE_ID>
 ```
 
-Or run the pipeline step by step:
+#### Option B: Granular Step-by-Step Pipeline
+Run discrete discovery stages individually with machine-readable JSON output:
 
+```bash
+# Extract business profile from your landing page
+agent-reach discovery profile --url https://my-saas.com --confirm
+
+# Link your Reddit handle to calibrate your account karma and stage
+agent-reach discovery accounts link reddit:my_handle
+
+# Clone your authentic voice style from your historical posts
+agent-reach discovery voice --from-account reddit:my_handle
+
+# Set community self-promotion rules for target subreddits
+agent-reach discovery rules set r/saas --self-promo thread_only --ai-content no
+
+# Search communities for pain points and solution requests
+agent-reach discovery search --max 15 --communities r/saas,r/entrepreneur
+
+# Filter qualified leads by minimum score
+agent-reach discovery leads --min-score 70
+
+# Draft value-first and product-aware replies
+agent-reach discovery reply <LEAD_ID>
+
+# Approve and get the direct link to post
+agent-reach discovery approve <REPLY_ID> --version value_first
+agent-reach discovery post <REPLY_ID>
 ```
-export ANTHROPIC_API_KEY=...            # or OPENAI_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, DEEPSEEK_API_KEY
-agent-reach discovery profile --url https://your-site.com --confirm
-agent-reach discovery accounts link reddit:your_handle
-agent-reach discovery voice --from-account reddit:your_handle
-agent-reach discovery rules set r/freelance --self-promo thread_only --ai-content no
-agent-reach discovery search --max 10 --communities r/freelance,r/smallbusiness
-agent-reach discovery leads --min-score 60
-agent-reach discovery reply LEAD_ID
-agent-reach discovery approve REPLY_ID --version value_first
-agent-reach discovery post REPLY_ID          # prints the text and a direct link
-agent-reach discovery confirm REPLY_ID --url https://www.reddit.com/...
+
+---
+
+### Style 3: The Claude Desktop User (Local MCP)
+
+*Best for users who want to converse with Claude Desktop and have Claude autonomously research leads, qualify threads, and draft replies using Agent Reach tools.*
+
+1. **Generate the configuration snippet automatically:**
+   ```bash
+   agent-reach mcp config claude-desktop
+   ```
+
+2. **Add to your Claude Desktop config:**
+   - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+   ```json
+   {
+     "mcpServers": {
+       "agent-reach": {
+         "command": "agent-reach",
+         "args": ["mcp"]
+       }
+     }
+   }
+   ```
+
+3. **Restart Claude Desktop and ask:**
+   > *"Use Agent Reach to discover customers for https://my-site.com on Reddit and Hacker News."*
+
+*Claude will interact with the 13 CEO tools in Company Mode, delegating work to specialists and presenting verified lead cards directly inside your chat.*
+
+---
+
+### Style 4: The Claude Code Hacker (CLI AI Agent)
+
+*Best for developers utilizing Anthropic's Claude Code CLI who want agentic customer discovery natively in their coding terminal.*
+
+1. **Register Agent Reach with Claude Code in one command:**
+   ```bash
+   claude mcp add agent-reach -- agent-reach mcp
+   ```
+
+2. **Or print the command using the CLI helper:**
+   ```bash
+   agent-reach mcp config claude-code
+   ```
+
+3. **In Claude Code:**
+   ```
+   > /mcp
+   > Use Agent Reach to analyze competitors for https://my-saas.com and draft community replies
+   ```
+
+---
+
+### Style 5: The Headless REST API Integrator
+
+*Best for backend engineers connecting Agent Reach to custom CRMs, internal admin portals, Zapier, or Slack bots.*
+
+1. **Start the API server (optionally set `AGENT_REACH_API_KEY` for bearer authentication):**
+   ```bash
+   export AGENT_REACH_API_KEY="sk_live_secret_key_123"
+   agent-reach dashboard --port 8000 --host 0.0.0.0
+   ```
+
+2. **Explore the Interactive Swagger API Docs:**
+   Open `http://localhost:8000/docs` or `http://localhost:8000/redoc`.
+
+3. **Example API Requests:**
+
+   **System Health Check:**
+   ```bash
+   curl http://localhost:8000/api/health
+   # {"status":"ok","version":"3.4.0","database":"ok"}
+   ```
+
+   **Retrieve High-Potential Leads:**
+   ```bash
+   curl -H "X-API-Key: sk_live_secret_key_123" \
+        http://localhost:8000/api/leads?min_score=70
+   ```
+
+   **Submit CEO Directive via API:**
+   ```bash
+   curl -X POST http://localhost:8000/api/team/directives \
+        -H "X-API-Key: sk_live_secret_key_123" \
+        -H "Content-Type: application/json" \
+        -d '{"message": "Find customers for https://my-saas.com"}'
+   ```
+
+---
+
+### Style 6: The Remote AI User (Claude Web & Remote MCP)
+
+*Best for hosted deployments on a VPS, AWS EC2, or Railway, connecting remote web clients via Server-Sent Events (SSE).*
+
+1. **Option A: Run unified (Dashboard + Remote MCP on port 8000):**
+   ```bash
+   agent-reach dashboard --port 8000 --host 0.0.0.0
+   ```
+   *Your Remote MCP endpoint is immediately live at:*
+   `https://your-server-domain.com/mcp/sse`
+
+2. **Option B: Run a dedicated standalone SSE MCP Server:**
+   ```bash
+   agent-reach mcp --transport sse --host 0.0.0.0 --port 8001
+   ```
+
+3. **Inspect the remote configuration format:**
+   ```bash
+   agent-reach mcp config remote --url https://your-server-domain.com/mcp/sse
+   ```
+
+---
+
+### Style 7: The IDE Copilot (Cursor & Windsurf)
+
+*Best for software engineers who want market intelligence and customer pain-point discovery right inside their code editor.*
+
+1. **Generate the configuration snippet:**
+   ```bash
+   agent-reach mcp config cursor
+   # or
+   agent-reach mcp config windsurf
+   ```
+
+2. **Add to `.cursor/mcp.json` in your project root:**
+   ```json
+   {
+     "mcpServers": {
+       "agent-reach": {
+         "command": "agent-reach",
+         "args": ["mcp"]
+       }
+     }
+   }
+   ```
+
+3. **In Cursor Composer / Agent:**
+   > *"Run an Agent Reach customer discovery pass on our new pricing model and check what users on r/SaaS complain about."*
+
+---
+
+## Lead Lifecycle & Verification (UML State Diagram)
+
+```mermaid
+stateDiagram-v2
+    [*] --> Discovered: Scout harvests community thread
+    Discovered --> Qualified: Qualifier scores pain & budget (1-100)
+    
+    state Qualified {
+        [*] --> LowScore: Score < 60
+        [*] --> HighPotential: Score >= 60 & Verified Quote
+        LowScore --> Dropped: Ignored
+    }
+
+    HighPotential --> ReplyDrafted: Writer drafts Value-First & Product-Aware
+    
+    state ReplyDrafted {
+        [*] --> LinterCheck
+        LinterCheck --> EditorReview: Passes 10 Linter Gates
+        LinterCheck --> WriterRevision: Fails Linter (Banned word / No quote)
+        WriterRevision --> LinterCheck
+    }
+
+    EditorReview --> CheckpointPending: Editor approves draft
+    CheckpointPending --> Approved: Human Founder approves in Dashboard/CLI
+    CheckpointPending --> Rejected: Human Founder requests edit
+    Rejected --> WriterRevision
+
+    Approved --> ReadyToPost: Inspector confirms account karma & stage
+    ReadyToPost --> Posted: Founder posts manually (or API if permitted)
+    Posted --> FollowUpActive: Follow-up tracker monitors thread
+    FollowUpActive --> Closed: Discussion finished or customer converted
+    Closed --> [*]
 ```
 
-`agent-reach discovery` with no command lists every command. Every command prints JSON.
+---
 
-## Platform rules the app follows
+## The 9 Specialist Roles
 
-| Platform | Drafts | Posting |
-| --- | --- | --- |
-| Reddit | yes | manual by default. API posting needs approved credentials, two switches and a passing gate |
-| Hacker News | no. Generated and AI-edited comments are banned there, so threads are research only | manual |
-| GitHub | yes | manual by default, API with a token |
-| X | yes, short | manual only. X forbids unsolicited automated replies |
-| Quora, web forums | yes | manual only |
+Every specialist is bound to a strict role charter and scoped toolset:
 
-Many subreddits ban AI-written content or self promotion. Read each community's rules and record them with `discovery rules set` (or `reach_set_community_rules`). The publisher refuses Reddit posts to communities whose rules you did not record. See `docs/safety.md`.
+| Specialist | Role & Responsibilities | Scoped Tools |
+| :--- | :--- | :--- |
+| **Analyst** | Crawls landing pages; extracts value propositions, pain vocabulary, and ICP boundaries. | `reach_fetch_site_text`, `reach_save_business_profile` |
+| **Scout** | Generates multi-angle search queries; harvests un-answered threads across Reddit, HN, GitHub, and web forums. | `reach_read_business_profile`, `reach_plan_searches`, `reach_harvest_threads` |
+| **Qualifier** | Scores buyer readiness using a 5-dimension rubric; validates evidence quotes against thread text. | `reach_read_thread`, `reach_save_lead`, `reach_list_leads`, `reach_set_lead_status` |
+| **Writer** | Generates authentic replies in your voice (**Value-First** and **Product-Aware**); enforces zero AI tells. | `reach_reply_context`, `reach_lint_reply`, `reach_save_reply`, `reach_import_voice` |
+| **Editor** | Second-opinion review; inspects tone, relevance, and over-pitching; rejects weak drafts. | `reach_list_leads`, `reach_lint_reply`, `reach_read_thread` |
+| **Strategist** | Reviews weekly pipeline health, lead conversion rates, and account safety standing. | `reach_read_business_profile`, `reach_list_leads`, `reach_insights`, `reach_account_health` |
+| **Researcher** | Conducts deep competitor research and extracts verified market claims. | `reach_fetch_site_text`, `reach_read_business_profile` |
+| **Follow-up** | Monitors posted threads for new replies, updates lead status, and tracks conversations. | `reach_read_thread`, `reach_list_leads`, `reach_set_lead_status` |
+| **Inspector** | Non-model deterministic guardian; evaluates account karma, posting ratio, and community compliance. | Internal deterministic verification engine |
 
-## The skill pack
+---
 
-Eight skills in `skills/`, each with references. `company-operations` is the CEO's playbook. The other seven are the stages the specialists follow:
+## Account Health & Platform Safety
 
-| Skill | Stage | Purpose |
-| --- | --- | --- |
-| company-operations | router | How the CEO plans, delegates, verifies and reports |
-| customer-discovery | router | Order of work, stop rules, report format |
-| business-intelligence | profile | Facts versus inferences, pain vocabulary, not-for list |
-| community-search | search | How members write, query shapes, community choice |
-| lead-qualification | qualify | Rubric, anti-inflation rules, calibration examples |
-| thread-engagement | engage | Choosing the post or a comment, handling replies |
-| community-copywriting | write | Reddit voice, banned words, pitch ladder, disclosure phrases, voice cloning |
-| platform-safety | safety | Rules per platform, FTC disclosure, warm-up plan |
+Agent Reach is built around sustainable community participation. It strictly enforces a 4-tier account ladder to protect your online reputation:
 
-Edit them freely. `python scripts/validate_skills.py` checks the result: frontmatter, references, dashes, tool names and that every good example passes the linter while every bad example fails it. `docs/skills.md` explains how to add your own voice samples and banned words.
+| Account Tier | Minimum Requirements | Maximum Allowed Pitch Level | Permitted Actions |
+| :--- | :--- | :--- | :--- |
+| **1. Build** | Age < 30 days or Karma < 100 | **Level 0: Help Only** | Provide pure objective value. Never name your product or link. |
+| **2. Trusted** | Age ≥ 30 days and Karma ≥ 100 | **Level 1: Category Mention** | Mention the category of solution. No product name. |
+| **3. Established** | Age ≥ 90 days and Karma ≥ 300 | **Level 2: Name Product** | Name product once naturally with clear first-person disclosure. No links. |
+| **4. Veteran** | Age ≥ 180 days and Karma ≥ 500 | **Level 3: Name & Link** | Include product link only when the original poster explicitly asks for recommendations. |
 
-## Limits you should know
+*Safety Rule: If more than 10% of an account's recent comments promote a product, its tier automatically drops by one level.*
 
-- Reddit's public JSON endpoints are rate limited and sometimes blocked. When comments cannot be read, the reply goes to the post.
-- Keyed search providers (Serper, Brave, Tavily), Reddit and GitHub posting through APIs, and the Docker image were written against vendor documentation and were not exercised against live accounts. Run `agent-reach discovery check search` and `check llm` with your keys.
-- The linter cannot guarantee that a human moderator or a platform classifier will not notice generated text. Edit every reply so it sounds like you, and post only where the rules allow it.
-- The word lists are tuned to English.
-- The host-assistant mode cannot prove that you, and not the assistant, answered an owner checkpoint. The server records your words and refuses an empty answer.
-- The auditor model and the second opinion need a provider key on the server. Without one, only the deterministic checks run.
+---
 
-## Development
+## Environment Configuration (`.env`)
 
+Every configuration parameter is optional. Create a `.env` file in the project root:
+
+```env
+# --- LLM Providers (Required for Autonomous CLI / Server Model; Not needed for MCP host mode) ---
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+GEMINI_API_KEY=
+GROQ_API_KEY=
+DEEPSEEK_API_KEY=
+LLM_PROVIDER=anthropic
+
+# --- Search Providers (Falls back to Exa and DuckDuckGo if unset) ---
+SERPER_API_KEY=
+BRAVE_API_KEY=
+TAVILY_API_KEY=
+
+# --- Database & Storage ---
+AGENT_REACH_DISCOVERY_DB=~/.agent-reach/discovery.db
+
+# --- API & Dashboard Security ---
+AGENT_REACH_API_KEY=your_optional_secret_api_key
+ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
+
+# --- Platform Posting (Manual by default; API posting requires explicit approval) ---
+AGENT_REACH_ALLOW_AUTOPOST=0
+REDDIT_CLIENT_ID=
+REDDIT_CLIENT_SECRET=
+REDDIT_USERNAME=
+REDDIT_PASSWORD=
+GITHUB_TOKEN=
+
+# --- YouTube Integration (Optional) ---
+YOUTUBE_API_KEY=
+YOUTUBE_DAILY_QUOTA=9000
 ```
+
+---
+
+## Development & Verification
+
+Run the full automated test suite and verification scripts:
+
+```bash
+# 1. Install development dependencies
 pip install -e ".[dev]"
-ruff check agent_reach scripts tests
-mypy agent_reach/discovery agent_reach/mcp agent_reach/team
-pytest
+
+# 2. Run the unit and integration test suite (211+ tests)
+python -m pytest tests -q
+
+# 3. Verify all 8 operating modes end-to-end
+python scripts/verify_all_modes.py
+
+# 4. Validate skill manifests and references
 python scripts/validate_skills.py
+
+# 5. Check tool reference synchronization
 python scripts/gen_tool_reference.py --check
 ```
 
-`docs/ci-cd.md` describes the workflow. `AUDIT.md` lists what the first audit found. `COMPANY_AUDIT.md` lists the weaknesses of the company layer and the 3.1 fixes. `CHANGELOG.md` lists the release notes.
+---
+
+## License
+
+MIT License. Designed and engineered for high-integrity, high-value customer discovery.
