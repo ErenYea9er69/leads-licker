@@ -1,5 +1,7 @@
 # Agent Reach
 
+<!-- mcp-name: io.github.ErenYea9er69/ai-customer-discovery -->
+
 [![Version](https://img.shields.io/badge/version-3.4.0-blue.svg)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python: 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)

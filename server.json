@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ErenYea9er69/ai-customer-discovery",
+  "title": "AI Customer Discovery",
+  "description": "Find prospective customers in public communities and draft honest, verified replies in your voice.",
+  "version": "3.4.0",
+  "repository": {
+    "url": "https://github.com/ErenYea9er69/AI-Customer-Discovery",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/ErenYea9er69/AI-Customer-Discovery",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "ai-customer-discovery",
+      "version": "3.4.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}
+

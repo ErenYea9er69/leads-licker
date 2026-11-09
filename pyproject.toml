@@ -1,5 +1,5 @@
 [project]
-name = "agent-reach"
+name = "ai-customer-discovery"
 version = "3.4.0"
 description = "A small AI company for customer discovery. You talk to the CEO. Specialists find people with the problem you solve in public communities and draft honest replies in your voice. Every output is verified. MCP server, CLI and API."
 readme = "README.md"
@@ -51,7 +51,13 @@ dashboard = [
     "uvicorn>=0.29",
 ]
 
+[project.urls]
+Homepage = "https://github.com/ErenYea9er69/AI-Customer-Discovery"
+Repository = "https://github.com/ErenYea9er69/AI-Customer-Discovery"
+Issues = "https://github.com/ErenYea9er69/AI-Customer-Discovery/issues"
+
 [project.scripts]
+ai-customer-discovery = "agent_reach.cli:main"
 agent-reach = "agent_reach.cli:main"
 
 [build-system]
