@@ -62,7 +62,7 @@ class SearchQuery(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     query: str
     intent_type: str = "frustration"  # frustration, alternative, recommendation, cost, tool_request
-    platform: str = "reddit"  # reddit, hackernews, web, github, twitter, quora
+    platform: str = "reddit"  # reddit, hackernews, web, github, twitter, quora, youtube
     target_community: Optional[str] = None  # e.g. "r/startups"
     rationale: str = ""
     # Buyer stage: switching, solution, problem, category. Empty for old rows.
@@ -151,6 +151,8 @@ class ReplyTarget(BaseModel):
     score: float = 0.0
     depth: int = 0
     age_hours: Optional[float] = None
+    # Facts from the page the target sits on, such as the transcript excerpt of a video. Context only.
+    context: str = ""
 
 
 class GeneratedReply(BaseModel):
@@ -179,12 +181,21 @@ class GeneratedReply(BaseModel):
     lint: Dict[str, Any] = Field(default_factory=dict)
     needs_human_edit: bool = False
     generated_by: str = "llm"
+    # The linked account that owns this reply ("platform:handle"). Empty for drafts made before accounts existed.
+    account_id: str = ""
     # Filled after posting.
     published_comment_id: str = ""
     published_url: str = ""
     outcome: Dict[str, Any] = Field(default_factory=dict)
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
+
+    @property
+    def target_key(self) -> str:
+        """"post" or "comment:<id>". One thread target takes one reply, ever."""
+        if self.target_kind == "comment" and self.target_comment_id:
+            return f"comment:{self.target_comment_id}"
+        return "post"
 
 
 class ReplyPreferences(BaseModel):
@@ -210,6 +221,10 @@ class LinkedAccount(BaseModel):
     platform: str
     handle: str
     mode: Literal["manual", "api"] = "manual"
+    # Short name used in credential variable names, such as REDDIT_ALT1_CLIENT_ID. Built from the handle when empty.
+    alias: str = ""
+    # Communities this account is best for. The app prefers it there. Empty means any.
+    focus: List[str] = Field(default_factory=list)
     snapshot: Dict[str, Any] = Field(default_factory=dict)
     snapshot_at: Optional[float] = None
     voice_imported_at: Optional[float] = None
@@ -243,6 +258,12 @@ class PostingSettings(BaseModel):
     max_mention_ratio: float = 0.1
     # Block posts to a community until the owner records its rules.
     require_rules_ack: bool = True
+    # One thread takes at most this many of the owner's replies, always from one account, never on the same target.
+    max_replies_per_thread: int = Field(default=2, ge=1, le=3)
+    # Minutes between two replies in the same thread.
+    min_thread_gap_minutes: int = Field(default=60, ge=0)
+    # Days during which only one of the owner's accounts may name the product in one community. 0 turns it off.
+    product_community_gap_days: int = Field(default=7, ge=0, le=60)
     reddit_client_id: Optional[str] = None
     reddit_client_secret: Optional[str] = None
     reddit_username: Optional[str] = None

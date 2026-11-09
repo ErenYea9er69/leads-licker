@@ -72,10 +72,15 @@ class ReplyGenerator:
         prefs: Optional[ReplyPreferences] = None,
         max_pitch_level: Optional[int] = None,
         previous: Sequence[str] = (),
+        thread_texts: Sequence[str] = (),
     ) -> GeneratedReply:
-        """Draft replies for `lead`. `max_pitch_level` comes from the account's health."""
+        """Draft replies for `lead`. `max_pitch_level` comes from the account's health.
+
+        `thread_texts` holds the owner's other replies in the same thread. The prompt asks for another angle.
+        """
         ctx = self.build_prompts(
-            lead, profile, target=target, prefs=prefs, max_pitch_level=max_pitch_level, previous=previous
+            lead, profile, target=target, prefs=prefs, max_pitch_level=max_pitch_level, previous=previous,
+            thread_texts=thread_texts,
         )
         prefs = ctx["prefs"]
         level, max_words, phrases = ctx["level"], ctx["max_words"], ctx["phrases"]
@@ -135,6 +140,7 @@ class ReplyGenerator:
         prefs: Optional[ReplyPreferences] = None,
         max_pitch_level: Optional[int] = None,
         previous: Sequence[str] = (),
+        thread_texts: Sequence[str] = (),
     ) -> Dict[str, Any]:
         """Build the exact system and user prompts the pipeline sends. The MCP server returns them to a host AI.
 
@@ -151,7 +157,7 @@ class ReplyGenerator:
         phrases = self._phrases(profile.name, prefs.persona, lead.id)
         return {
             "system": skillpack.prompt("community-copywriting", "thread-engagement"),
-            "prompt": self._prompt(lead, profile, target, prefs, level, max_words, phrases, previous),
+            "prompt": self._prompt(lead, profile, target, prefs, level, max_words, phrases, previous, thread_texts),
             "level": level,
             "max_words": max_words,
             "phrases": phrases,
@@ -234,6 +240,7 @@ class ReplyGenerator:
         max_words: int,
         phrases: List[str],
         previous: Sequence[str],
+        thread_texts: Sequence[str] = (),
     ) -> str:
         policy = get_policy(lead.platform)
         t = target or ReplyTarget()
@@ -253,6 +260,18 @@ class ReplyGenerator:
         )
         user_terms = self._user_terms(prefs)
         prior = "\n".join(f"- {p[:90]}" for p in list(previous)[-5:]) or "none"
+        in_thread = "\n".join(f"- {sanitize(p, 400)}" for p in list(thread_texts)[-3:])
+        thread_block = (
+            "\n<same_thread_replies note=\"The owner already replied in this thread. This reply answers another person on "
+            "another point. Use a different opening, a different structure and different words. Do not name the product "
+            "again. Do not refer to the other reply.\">\n" + in_thread + "\n</same_thread_replies>\n"
+            if in_thread else ""
+        )
+        context_block = (
+            "Background from the page (a transcript excerpt). Use only what it says. Do not describe the video "
+            "beyond it, and quote no timestamp that is not listed:\n" + sanitize(t.context, 900) + "\n"
+            if t.context else ""
+        )
         link_line = (
             f"Link you may use once, only if the thread asks for one: {profile.url}"
             if level >= 3 and profile.url else "No links."
@@ -293,14 +312,14 @@ Pick one of these or write a close variant. Put it where it reads naturally, not
 <recent_replies_do_not_reuse_wording note="Also change the opening and the ending. Do not repeat their order of ideas.">
 {prior}
 </recent_replies_do_not_reuse_wording>
-
+{thread_block}
 <untrusted_thread platform="{lead.platform}" community="{lead.community}">
 Title: {sanitize(lead.title, 300)}
 Excerpt: {sanitize(lead.excerpt, 600)}
 Problem in the post: {sanitize(lead.customer_problem, 300)}
 Reply target: {t.target_kind}{(" by " + t.target_author) if t.target_author else ""}
 Target text: {sanitize(t.target_text or lead.excerpt, 400)}
-</untrusted_thread>
+{context_block}</untrusted_thread>
 
 Write the replies for the reply target.
 First pick the one detail in the target text that matters most (a number, a tool, a constraint) and react to it.

@@ -27,7 +27,16 @@ Pick one target with a reason. Write the reason as one plain sentence that names
 
 Do not reply under hostile, off-topic or joke comments. Do not argue. Do not reply to a comment from a moderator unless it asks you something.
 
-Stay silent when any of these holds: a comment already gives the full answer, the thread has 80 or more comments, the thread is older than 7 days with an active answer thread, the community rules forbid your kind of reply, the thread is locked, or you already replied in it. One reply per thread. A second reply is allowed only to answer a direct question to you.
+Stay silent when any of these holds: a comment already gives the full answer, the thread has 80 or more comments, the thread is older than 7 days with an active answer thread, the community rules forbid your kind of reply, or the thread is locked.
+
+Replying twice in one thread. The default is one reply. A second reply, and at most a third, is allowed only when it answers a different person's separate question. The code enforces these rules and refuses a draft that breaks one.
+1. A post or a comment takes one reply, ever. Never answer the same comment twice.
+2. One account per thread. The first reply fixes the account. Do not bring a second account of the owner into a thread, not even to agree with the first.
+3. Never answer a person you already answered in this thread.
+4. Open each reply with different words, and use a different structure and length.
+5. Only one reply in the thread names the product.
+6. A gap separates two replies in one thread (60 minutes by default).
+7. Never write the second reply as if it came from someone else, and never refer to the first one as if a stranger wrote it.
 
 Match the thread. Use the length and tone of the parent: a one-line parent gets two or three sentences, a long technical post gets a longer and more precise answer. Answer the person's constraint first. Name the constraint in your first sentence ("for a solo setup under 10 invoices a month, ...").
 
@@ -40,10 +49,10 @@ Output a target object: target_kind ("post" or "comment"), target_comment_id (em
 
 ## Workflow for a host AI
 
-1. Fetch the comment tree. Sort candidates by the rules above.
+1. Fetch the comment tree. Sort candidates by the rules above. For a second reply, skip targets and people the owner already answered.
 2. Pick one target. Write the reason before the draft.
 3. Draft with the community-copywriting skill. Use the parent's text as context. The reply must answer the parent, not only the post.
-4. Run the lint tool. Save the draft with the target fields.
+4. Run the lint tool. Save the draft with the target fields. Leave account empty and the app picks one. Pass add_reply as true to keep an open draft and add a second reply on the same thread.
 5. After the owner posts, check the thread once after 24 hours. Answer a direct question to you. Stop there.
 
 ## Target scoring table

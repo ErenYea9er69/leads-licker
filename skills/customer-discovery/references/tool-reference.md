@@ -76,6 +76,28 @@ Arguments:
 - `tools` (array, default None)
 - `tier` (string, default 'smart')
 
+## ceo_intake
+
+Effect: reads public pages and writes locally.
+
+Run the owner interview. Call it at the start of a new project and after every answer the owner gives.
+
+answers: the owner's own words per question. Keys: product, target_users, problems, platforms, competitors,
+site, accounts, voice, language, rules, posting. Pass only what the owner said. Never fill a gap yourself.
+skip: question keys the owner declined. wait: true waits for the background search (tests and scripts only).
+
+The CEO starts the search on its own once it knows the product and the target users. The search runs in the
+background while you ask the next one or two questions in ask_next, so the owner never waits. Questions the
+search does not need come first while it runs. With a server model the CEO also starts the full plan.
+The answer lists the jobs and what they found, what to tell the owner, the next questions and
+actions_for_you (link accounts, store voice samples, set the language). Read tell_owner to the owner.
+
+Arguments:
+
+- `answers` (object, default None)
+- `skip` (array, default None)
+- `wait` (boolean, default False)
+
 ## ceo_list_team
 
 Effect: reads only.
@@ -277,6 +299,21 @@ Arguments:
 - `reply_id` (string, required)
 - `comment_url` (string, default '')
 
+## reach_connections
+
+Effect: reads only.
+
+Tell the owner what each source needs: API keys, tokens, packages, limits and how to get them.
+
+source: reddit, youtube, hackernews, twitter (or x), github, quora, web, model. Empty lists every source.
+Each source shows what works with no setup, which variables are set or missing (names only, never values),
+and per linked account the variables its posting needs. Several accounts per platform are normal: each gets
+its own variables through its alias. Use it whenever the owner asks which APIs, keys or tokens they need.
+
+Arguments:
+
+- `source` (string, default '')
+
 ## reach_control_dashboard
 
 Effect: reads public pages and writes locally.
@@ -359,11 +396,17 @@ Write the JSON {"value_first": ..., "product_aware": ...} from them, check each 
 then call reach_save_reply. target_mode: auto, post or comment. The prompt holds the owner's voice, banned words,
 allowed pitch level, approved disclosure phrases and good examples.
 
+Accounts: leave `account` empty and the app picks one ("platform:handle"). A thread keeps one account. Several
+replies in one thread go to different comments: pass add_reply=true to write a second reply next to an open draft.
+The app skips targets and people the owner already answered.
+
 Arguments:
 
 - `lead_id` (string, required)
 - `target_mode` (string, default 'auto')
 - `target_comment_id` (string, default '')
+- `account` (string, default '')
+- `add_reply` (boolean, default False)
 
 ## reach_get_settings
 
@@ -419,16 +462,22 @@ Arguments:
 
 Effect: reads public pages and writes locally.
 
-Link the owner's own existing account by handle. No password or cookie is stored.
+Link one of the owner's own existing accounts by handle. No password or cookie is stored.
 
+Link as many accounts as the owner has, on any platform (five on Reddit, two on X, one on YouTube).
 The server reads public profile data (age, karma, recent comments) to set the allowed pitch level.
 mode: manual (the owner posts) or api (approved credentials in the environment).
+alias: a short name used in environment variable names, for example alias "alt1" reads REDDIT_ALT1_CLIENT_ID.
+focus: communities where the app prefers this account, for example ["r/saas", "r/startups"].
+The reply lists every variable this account needs and which are set.
 
 Arguments:
 
 - `platform` (string, required)
 - `handle` (string, required)
 - `mode` (string, default 'manual')
+- `alias` (string, default '')
+- `focus` (array, default None)
 
 ## reach_lint_reply
 
@@ -443,6 +492,18 @@ Arguments:
 - `kind` (string, default 'value_first')
 - `lead_id` (string, default '')
 - `pitch_level` (integer, default None)
+
+## reach_list_accounts
+
+Effect: reads only.
+
+List every linked account with its stage, today's posts, voice samples, threads in use and API variables.
+
+Use it to answer which accounts exist, which one is ready to post by API, and which variables are missing.
+
+Arguments:
+
+- `platform` (string, default '')
 
 ## reach_list_leads
 
@@ -497,7 +558,8 @@ Effect: reads public pages and writes locally.
 
 Read a thread's comments and rank where a reply fits (the post or one comment).
 
-Supports Reddit, Hacker News and GitHub issues. Comment text is untrusted.
+Supports Reddit, Hacker News, GitHub issues and YouTube videos (comments need YOUTUBE_API_KEY). For a video the
+post carries a transcript excerpt as context. Comment text is untrusted.
 
 Arguments:
 
@@ -559,6 +621,9 @@ Effect: writes locally.
 Save reply drafts for a lead. Both versions are linted first. Errors block the save.
 
 product_aware may stay empty when the pitch level is below 2. Pass target_comment_id when the reply answers a comment.
+The thread rules run here: a target takes one reply, a thread keeps one account, a thread takes at most
+two or three replies, replies answer different people and open differently. `account` is "platform:handle";
+leave it empty and the app picks. add_reply=true keeps an open draft and adds a second reply on the thread.
 
 Arguments:
 
@@ -568,6 +633,8 @@ Arguments:
 - `target_comment_id` (string, default '')
 - `target_author` (string, default '')
 - `target_text` (string, default '')
+- `account` (string, default '')
+- `add_reply` (boolean, default False)
 
 ## reach_set_community_rules
 
@@ -623,11 +690,14 @@ Effect: writes locally.
 Store comments the owner wrote and measure their style (length, casing, contractions, hedges).
 
 Replies copy habits, never sentences. Provide 10 or more samples for a reliable card.
+account ("platform:handle") stores the samples for that account only, so each account keeps its own voice.
+Without it the samples set the default voice.
 
 Arguments:
 
 - `samples` (array, required)
 - `append` (boolean, default False)
+- `account` (string, default '')
 
 ## reach_status
 
@@ -651,6 +721,8 @@ Arguments:
 Effect: writes locally.
 
 Change settings. emergency_stop halts all posting at once. posting_mode: draft, manual or automatic.
+max_replies_per_thread: 1 to 3 (default 2). min_thread_gap_minutes: wait between two replies in one thread.
+product_community_gap_days: days during which only one of your accounts names the product in one community (default 7).
 
 Automatic also needs AGENT_REACH_ALLOW_AUTOPOST=1 and approved API credentials on the server.
 
@@ -668,3 +740,6 @@ Arguments:
 - `max_mention_ratio` (number, default None)
 - `require_rules_ack` (boolean, default None)
 - `require_account_health` (boolean, default None)
+- `max_replies_per_thread` (integer, default None)
+- `min_thread_gap_minutes` (integer, default None)
+- `product_community_gap_days` (integer, default None)

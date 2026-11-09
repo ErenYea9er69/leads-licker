@@ -163,12 +163,14 @@ class DiscoveryStorage:
 
                 CREATE TABLE IF NOT EXISTS replies (
                     id TEXT PRIMARY KEY,
-                    lead_id TEXT UNIQUE,
+                    lead_id TEXT,
+                    target_key TEXT NOT NULL DEFAULT 'post',
                     status TEXT,
                     selected_version TEXT,
                     data JSON,
                     created_at REAL,
-                    updated_at REAL
+                    updated_at REAL,
+                    UNIQUE (lead_id, target_key)
                 );
 
                 CREATE TABLE IF NOT EXISTS posting_logs (
@@ -181,7 +183,8 @@ class DiscoveryStorage:
                     mode TEXT,
                     status TEXT,
                     error_message TEXT,
-                    created_at REAL
+                    created_at REAL,
+                    account_id TEXT DEFAULT ''
                 );
 
                 CREATE TABLE IF NOT EXISTS settings (
@@ -216,6 +219,10 @@ class DiscoveryStorage:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(posting_logs)").fetchall()}
             if "kind" not in cols:
                 conn.execute("ALTER TABLE posting_logs ADD COLUMN kind TEXT DEFAULT ''")
+            if "account_id" not in cols:
+                conn.execute("ALTER TABLE posting_logs ADD COLUMN account_id TEXT DEFAULT ''")
+            self._migrate_replies(conn)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_posting_account ON posting_logs (account_id, platform, status, created_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_replies_lead ON replies (lead_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_posting_platform ON posting_logs (platform, status, created_at)")
             # Newest-first lists read the index and stop at the limit. Without these, each list scanned the whole table.
@@ -224,6 +231,33 @@ class DiscoveryStorage:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_replies_created ON replies (created_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_profiles_updated ON business_profiles (updated_at)")
         self._scrub_stored_secrets()
+
+    @staticmethod
+    def _migrate_replies(conn: sqlite3.Connection) -> None:
+        """Older databases allowed one reply per lead. A thread now takes up to three, one per target."""
+        if "target_key" in {r["name"] for r in conn.execute("PRAGMA table_info(replies)").fetchall()}:
+            return
+        conn.execute("BEGIN IMMEDIATE")
+        if "target_key" in {r["name"] for r in conn.execute("PRAGMA table_info(replies)").fetchall()}:
+            return   # another process finished the migration first
+        old = conn.execute("SELECT id, lead_id, status, selected_version, data, created_at, updated_at FROM replies").fetchall()
+        conn.execute("ALTER TABLE replies RENAME TO replies_old")
+        conn.execute(
+            """CREATE TABLE replies (
+                id TEXT PRIMARY KEY, lead_id TEXT, target_key TEXT NOT NULL DEFAULT 'post', status TEXT,
+                selected_version TEXT, data JSON, created_at REAL, updated_at REAL, UNIQUE (lead_id, target_key))"""
+        )
+        for row in old:
+            try:
+                data = json.loads(row["data"])
+            except (TypeError, ValueError):
+                data = {}
+            key = f"comment:{data['target_comment_id']}" if data.get("target_kind") == "comment" and data.get("target_comment_id") else "post"
+            conn.execute(
+                "INSERT INTO replies (id, lead_id, target_key, status, selected_version, data, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                (row["id"], row["lead_id"], key, row["status"], row["selected_version"], row["data"], row["created_at"], row["updated_at"]),
+            )
+        conn.execute("DROP TABLE replies_old")
 
     def _scrub_stored_secrets(self) -> None:
         """Older versions of the dashboard saved Reddit and GitHub credentials in the database. Remove them."""
@@ -346,7 +380,26 @@ class DiscoveryStorage:
                 )
                 return True
         except sqlite3.IntegrityError:
-            return False
+            # A thread the intake search found early waits for the scout. The scout's own harvest claims it once.
+            return self._claim_prefetched(item)
+
+    def _claim_prefetched(self, item: DiscoveredItem) -> bool:
+        with self._connection() as conn:
+            row = conn.execute("SELECT id, data FROM discovered_items WHERE url = ?", (item.url,)).fetchone()
+            if row is None:
+                return False
+            try:
+                held = json.loads(row["data"])
+            except ValueError:
+                return False
+            if not (held.get("raw_data") or {}).get("prefetch"):
+                return False
+            conn.execute(
+                "UPDATE discovered_items SET id=?, platform=?, community=?, author=?, title=?, content=?, data=?, created_at=? WHERE id=?",
+                (item.id, item.platform, item.community, item.author, item.title, item.content,
+                 item.model_dump_json(), item.created_at, row["id"]),
+            )
+            return True
 
     def get_discovered_item(self, item_id: str) -> Optional[DiscoveredItem]:
         with self._connection() as conn:
@@ -378,11 +431,29 @@ class DiscoveryStorage:
             conn.execute("UPDATE discovered_items SET data = ? WHERE id = ?", (item.model_dump_json(), item.id))
 
     def is_url_discovered(self, url: str) -> bool:
+        """True when the thread is stored and already handed on. A prefetched thread nobody claimed yet counts as new."""
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT 1 FROM discovered_items WHERE url = ? OR url = ?", (canonical_url(url), url)
+                "SELECT data FROM discovered_items WHERE url = ? OR url = ?", (canonical_url(url), url)
             ).fetchone()
-            return row is not None
+        if row is None:
+            return False
+        try:
+            return not (json.loads(row["data"]).get("raw_data") or {}).get("prefetch")
+        except ValueError:
+            return True
+
+    def mark_prefetched(self, item_id: str) -> None:
+        """Flag a stored thread as found ahead of the scout. The scout's harvest claims it later."""
+        item = self.get_discovered_item(item_id)
+        if item is not None:
+            item.raw_data = {**(item.raw_data or {}), "prefetch": True}
+            self.update_discovered_item(item)
+
+    def count_prefetched(self) -> int:
+        with self._connection() as conn:
+            rows = conn.execute("SELECT data FROM discovered_items ORDER BY created_at DESC LIMIT 500").fetchall()
+        return sum(1 for r in rows if (json.loads(r["data"]).get("raw_data") or {}).get("prefetch"))
 
     # ── Leads ──
 
@@ -509,32 +580,41 @@ class DiscoveryStorage:
 
     # ── Replies ──
 
-    def save_reply(self, reply: GeneratedReply) -> None:
-        """Save a reply. One reply exists per lead, so a new draft replaces the old one."""
+    def save_reply(self, reply: GeneratedReply, keep_others: bool = False) -> None:
+        """Save a reply. A thread target takes one reply, so a new draft for the same target replaces the old one.
+
+        A draft for a different target replaces the lead's open draft, unless `keep_others` is set or the
+        earlier replies are already approved or posted. Then it becomes a second reply on the thread.
+        """
         reply.updated_at = time.time()
+        key = reply.target_key
         with self._connection() as conn:
-            existing = conn.execute("SELECT id, created_at FROM replies WHERE lead_id = ?", (reply.lead_id,)).fetchone()
-            if existing and existing["id"] != reply.id:
-                reply.id = existing["id"]
-                reply.created_at = existing["created_at"]
+            same = conn.execute(
+                "SELECT id, created_at FROM replies WHERE lead_id = ? AND target_key = ?", (reply.lead_id, key)
+            ).fetchone()
+            if same and same["id"] != reply.id:
+                reply.id, reply.created_at = same["id"], same["created_at"]
+            elif not same and not keep_others:
+                draft = conn.execute(
+                    "SELECT id, created_at FROM replies WHERE lead_id = ? AND status = 'draft' AND id != ? "
+                    "ORDER BY updated_at DESC LIMIT 1", (reply.lead_id, reply.id),
+                ).fetchone()
+                if draft:
+                    reply.id, reply.created_at = draft["id"], draft["created_at"]
             conn.execute(
                 """
-                INSERT INTO replies (id, lead_id, status, selected_version, data, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO replies (id, lead_id, target_key, status, selected_version, data, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
+                    target_key=excluded.target_key,
                     status=excluded.status,
                     selected_version=excluded.selected_version,
                     data=excluded.data,
                     updated_at=excluded.updated_at
                 """,
                 (
-                    reply.id,
-                    reply.lead_id,
-                    reply.status,
-                    reply.selected_version,
-                    reply.model_dump_json(),
-                    reply.created_at,
-                    reply.updated_at,
+                    reply.id, reply.lead_id, key, reply.status, reply.selected_version,
+                    reply.model_dump_json(), reply.created_at, reply.updated_at,
                 ),
             )
 
@@ -545,10 +625,30 @@ class DiscoveryStorage:
 
     def get_reply_by_lead_id(self, lead_id: str) -> Optional[GeneratedReply]:
         with self._connection() as conn:
-            row = conn.execute("SELECT data FROM replies WHERE lead_id = ?", (lead_id,)).fetchone()
+            row = conn.execute(
+                "SELECT data FROM replies WHERE lead_id = ? ORDER BY updated_at DESC LIMIT 1", (lead_id,)
+            ).fetchone()
             if row:
                 return GeneratedReply.model_validate_json(row["data"])
         return None
+
+    def list_replies_for_lead(self, lead_id: str) -> List[GeneratedReply]:
+        with self._connection() as conn:
+            rows = conn.execute("SELECT data FROM replies WHERE lead_id = ? ORDER BY created_at", (lead_id,)).fetchall()
+            return [GeneratedReply.model_validate_json(r["data"]) for r in rows]
+
+    def thread_replies(self, url: str) -> List[GeneratedReply]:
+        """Every live reply (not rejected) on one thread, from any lead and any account."""
+        from agent_reach.discovery.thread_check import canonical_url
+
+        urls = list({url, canonical_url(url)})
+        marks = ",".join("?" for _ in urls)
+        with self._connection() as conn:
+            rows = conn.execute(
+                f"SELECT r.data FROM replies r JOIN leads l ON l.id = r.lead_id "
+                f"WHERE l.url IN ({marks}) AND r.status != 'rejected' ORDER BY r.created_at", urls,
+            ).fetchall()
+            return [GeneratedReply.model_validate_json(r["data"]) for r in rows]
 
     def list_replies(self, status: Optional[str] = None, limit: int = 100) -> List[GeneratedReply]:
         with self._connection() as conn:
@@ -576,6 +676,7 @@ class DiscoveryStorage:
         status: str,
         error_message: Optional[str] = None,
         kind: str = "",
+        account_id: str = "",
     ) -> None:
         import uuid
 
@@ -583,8 +684,9 @@ class DiscoveryStorage:
             conn.execute(
                 """
                 INSERT INTO posting_logs (
-                    id, lead_id, reply_id, platform, target_url, content, mode, status, error_message, created_at, kind
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, lead_id, reply_id, platform, target_url, content, mode, status, error_message, created_at, kind,
+                    account_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(uuid.uuid4()),
@@ -598,10 +700,13 @@ class DiscoveryStorage:
                     error_message or "",
                     time.time(),
                     kind,
+                    account_id,
                 ),
             )
 
-    def recent_published_kinds(self, platform: Optional[str] = None, limit: int = 30, since_days: int = 30) -> List[str]:
+    def recent_published_kinds(
+        self, platform: Optional[str] = None, limit: int = 30, since_days: int = 30, account_id: Optional[str] = None
+    ) -> List[str]:
         """Kinds ("value_first" or "product_aware") of the latest published replies, newest first."""
         cutoff = time.time() - since_days * 86400
         sql = "SELECT kind FROM posting_logs WHERE status = 'published' AND created_at >= ?"
@@ -609,10 +714,26 @@ class DiscoveryStorage:
         if platform:
             sql += " AND platform = ?"
             params.append(platform)
+        if account_id:
+            sql += " AND account_id = ?"
+            params.append(account_id)
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
         with self._connection() as conn:
             return [r["kind"] or "" for r in conn.execute(sql, params).fetchall()]
+
+    def product_posters(self, platform: str, community: str, days: int) -> List[str]:
+        """Accounts that named the product in one community during the last `days` days."""
+        if not community or days <= 0:
+            return []
+        sql = (
+            "SELECT DISTINCT p.account_id FROM posting_logs p JOIN leads l ON l.id = p.lead_id "
+            "WHERE p.platform = ? AND lower(l.community) = ? AND p.kind = 'product_aware' "
+            "AND p.status IN ('published', 'pending_manual_post') AND p.created_at >= ?"
+        )
+        with self._connection() as conn:
+            rows = conn.execute(sql, (platform, community.lower(), time.time() - days * 86400)).fetchall()
+        return [r["account_id"] or "" for r in rows]
 
     def list_posting_logs(self, limit: int = 50, platform: Optional[str] = None) -> List[Dict[str, Any]]:
         sql = "SELECT * FROM posting_logs"
@@ -625,38 +746,30 @@ class DiscoveryStorage:
         with self._connection() as conn:
             return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
-    def last_published_at(self, platform: Optional[str] = None) -> Optional[float]:
+    def last_published_at(self, platform: Optional[str] = None, account_id: Optional[str] = None) -> Optional[float]:
+        sql = "SELECT MAX(created_at) FROM posting_logs WHERE status = 'published'"
+        params: List[Any] = []
+        if platform:
+            sql += " AND platform = ?"
+            params.append(platform)
+        if account_id:
+            sql += " AND account_id = ?"
+            params.append(account_id)
         with self._connection() as conn:
-            if platform:
-                row = conn.execute(
-                    "SELECT MAX(created_at) FROM posting_logs WHERE status = 'published' AND platform = ?",
-                    (platform,),
-                ).fetchone()
-            else:
-                row = conn.execute(
-                    "SELECT MAX(created_at) FROM posting_logs WHERE status = 'published'"
-                ).fetchone()
+            row = conn.execute(sql, params).fetchone()
             return row[0] if row and row[0] else None
 
-    def count_posts_today(self, platform: Optional[str] = None) -> int:
-        start_of_day = time.time() - (time.time() % 86400)
+    def count_posts_today(self, platform: Optional[str] = None, account_id: Optional[str] = None) -> int:
+        sql = "SELECT COUNT(*) FROM posting_logs WHERE status = 'published' AND created_at >= ?"
+        params: List[Any] = [time.time() - (time.time() % 86400)]
+        if platform:
+            sql += " AND platform = ?"
+            params.append(platform)
+        if account_id:
+            sql += " AND account_id = ?"
+            params.append(account_id)
         with self._connection() as conn:
-            if platform:
-                row = conn.execute(
-                    """
-                    SELECT COUNT(*) FROM posting_logs
-                    WHERE platform = ? AND status = 'published' AND created_at >= ?
-                    """,
-                    (platform, start_of_day),
-                ).fetchone()
-            else:
-                row = conn.execute(
-                    """
-                    SELECT COUNT(*) FROM posting_logs
-                    WHERE status = 'published' AND created_at >= ?
-                    """,
-                    (start_of_day,),
-                ).fetchone()
+            row = conn.execute(sql, params).fetchone()
             return row[0] if row else 0
 
     # ── Settings ──

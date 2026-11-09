@@ -70,7 +70,8 @@ def lead_cards(storage: Any, directive: Directive, limit: int = 12, inspections:
     leads = [lead for lead in storage.list_leads(limit=200) if lead.created_at >= directive.created_at - 1]
     leads.sort(key=lambda lead: lead.score, reverse=True)
     for lead in leads[:limit]:
-        reply = storage.get_reply_by_lead_id(lead.id)
+        all_replies = storage.list_replies_for_lead(lead.id)
+        reply = max(all_replies, key=lambda r: r.updated_at) if all_replies else None
         card: Dict[str, Any] = {
             "lead_id": lead.id,
             "title": lead.title[:140],
@@ -87,6 +88,7 @@ def lead_cards(storage: Any, directive: Directive, limit: int = 12, inspections:
             card["reply"] = {
                 "reply_id": reply.id, "status": reply.status, "pitch_level": reply.pitch_level,
                 "value_first": reply.value_first, "product_aware": reply.product_aware,
+                "account": reply.account_id or None, "target": reply.target_key,
                 "lint_passed": all(bool(v.get("passed")) for v in (reply.lint or {}).values()) if reply.lint else None,
             }
             gate = gates.get(reply.id)
@@ -95,6 +97,14 @@ def lead_cards(storage: Any, directive: Directive, limit: int = 12, inspections:
                     "code": gate["code"], "message": gate["message"], "ready": gate["ready"],
                     "waits": gate["waits"], "editor_verdict": gate["editor_verdict"], "attention": gate["attention"],
                 }
+            if len(all_replies) > 1:   # a thread can hold two or three replies, each on its own target
+                card["other_replies"] = [
+                    {
+                        "reply_id": r.id, "status": r.status, "account": r.account_id or None, "target": r.target_key,
+                        "target_author": r.target_author or None, "value_first": r.value_first,
+                    }
+                    for r in all_replies if r.id != reply.id
+                ]
         cards.append(card)
     return cards
 

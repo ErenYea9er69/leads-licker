@@ -105,6 +105,8 @@ class CommunityHarvester:
                 return self.search_twitter(query.query, limit=limit)
             if platform == "github":
                 return self.search_github(query.query, limit=limit)
+            if platform == "youtube":
+                return self.search_youtube(query.query, limit=limit)
             return self.search_web(query.query, limit=limit)
         except Exception as exc:  # one bad query must not stop the campaign
             log.exception("harvest failed for %s query %r", platform, query.query)
@@ -436,6 +438,100 @@ class CommunityHarvester:
                 url=canon, platform="web", community=host_of(url),
                 author=res.get("author") or "", published_at=published,
                 title=title, content=f"{title}\n\n{content}"[:6000], raw_data={"source": "exa"},
+            )
+            kept = self._keep(item, health)
+            if kept:
+                items.append(kept)
+            if len(items) >= limit:
+                break
+        return items
+
+    # ── YouTube ──
+
+    def search_youtube(self, query: str, limit: int = 5) -> List[DiscoveredItem]:
+        """Videos whose comments hold the customers. Needs YOUTUBE_API_KEY for comment counts and comments.
+
+        Without a key the search runs through the web search chain. Those videos stay unverified and carry
+        no comments. The transcript, when the video has one, is read in the owner's language.
+        """
+        from agent_reach.discovery import youtube as yt
+        from agent_reach.discovery.thread_check import youtube_video_id
+
+        clean = _clean_query(query)
+        lang = str((self.storage.get_setting("reply_preferences", {}) or {}).get("language") or "en")
+        max_age = PLATFORM_MAX_AGE_DAYS["youtube"]
+        api = yt.YouTubeAPI(self.session, self.storage)
+        found: List[Dict[str, Any]] = []   # {"id", "title", "published_at", "channel"}
+        metas: Dict[str, Dict[str, Any]] = {}
+        if api.available():
+            try:
+                for hit in api.search(clean, limit * 3, days=max_age, language=lang):
+                    vid = (hit.get("id") or {}).get("videoId")
+                    snip = hit.get("snippet") or {}
+                    if vid:
+                        found.append({"id": vid, "title": snip.get("title") or "", "published_at": snip.get("publishedAt"), "channel": snip.get("channelTitle") or ""})
+                metas = api.videos([f["id"] for f in found])
+            except yt.YouTubeError as exc:
+                log.warning("YouTube API failed: %s", str(exc)[:160])
+                self.diagnostics[f"youtube_api:{exc.code}"] += 1
+                found, metas = [], {}
+        if not found:   # no key, or the API failed: the web search chain still lists videos
+            for res in self._search(f"site:youtube.com/watch {clean}", limit * 3, days=max_age):
+                vid = youtube_video_id(res.get("url", ""))
+                if vid:
+                    found.append({"id": vid, "title": re.sub(r"\s*-\s*YouTube$", "", res.get("title") or ""), "published_at": res.get("published_at"), "channel": res.get("author") or "", "text": res.get("text") or ""})
+
+        items: List[DiscoveredItem] = []
+        seen = set()
+        for hit in found:
+            vid = hit["id"]
+            if vid in seen:
+                continue
+            seen.add(vid)
+            canon = f"https://youtube.com/watch?v={vid}"
+            if self.storage.is_url_discovered(canon):
+                self._reject("duplicate")
+                continue
+            meta = metas.get(vid)
+            health = yt.judge_youtube(meta, hit.get("published_at"))
+            if not health.reject and not yt.same_language(yt.video_language(meta or {}), lang):
+                health.reject = "language_mismatch"
+            snip = (meta or {}).get("snippet") or {}
+            title = snip.get("title") or hit["title"]
+            description = (snip.get("description") or hit.get("text") or "").strip()
+            if not health.reject and is_promotional(title, description):
+                health.reject = "promotional"
+            if health.reject:
+                self._reject(health.reject)
+                continue
+
+            parts = [title, description[:600]]
+            transcript: Dict[str, Any] = {}
+            tr = yt.fetch_transcript(vid, [lang], translate_to=lang)
+            if tr.get("ok"):
+                self.diagnostics["youtube_transcript_ok"] += 1
+                transcript = {k: tr[k] for k in ("language_code", "is_generated", "translated", "translated_to", "characters")}
+                parts.append(yt.transcript_note(tr) + "\n" + yt.excerpt(tr["segments"], clean))
+            else:
+                self.diagnostics[f"youtube_transcript:{tr.get('error')}"] += 1
+            if api.available() and health.verified and (health.num_comments or 0) > 0:
+                try:
+                    flat = yt.flatten_comments(api.comment_threads(vid, 8), snip.get("channelId") or "")
+                    top = [f"- {c['author']}: {c['body'][:220]}" for c in flat if c["depth"] == 0][:6]
+                    if top:
+                        parts.append("Top comments:\n" + "\n".join(top))
+                except yt.YouTubeError as exc:
+                    if exc.code == "comments_disabled":
+                        self._reject("comments_disabled")
+                        continue
+                    self.diagnostics[f"youtube_comments:{exc.code}"] += 1
+            item = DiscoveredItem(
+                url=canon, platform="youtube", community=snip.get("channelTitle") or hit.get("channel") or "YouTube",
+                author=snip.get("channelTitle") or hit.get("channel") or "",
+                published_at=str(snip.get("publishedAt") or hit.get("published_at") or "")[:10],
+                title=title, content="\n\n".join(p for p in parts if p)[:6000],
+                raw_data={"source": "api" if meta else "search", "video_id": vid, "channel_id": snip.get("channelId") or "",
+                          "language": yt.video_language(meta or {}), "transcript": transcript},
             )
             kept = self._keep(item, health)
             if kept:

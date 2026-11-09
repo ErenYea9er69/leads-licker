@@ -48,6 +48,12 @@ POLICIES: Dict[str, PlatformPolicy] = {
         "One or two short sentences. No hashtags, no emoji unless the owner uses them, no thread numbering. Match the owner's timeline voice.",
         "X forbids unsolicited automated replies. A person sends every reply.",
     ),
+    "youtube": PlatformPolicy(
+        "youtube", "allowed", "manual", 70,
+        "One short comment. Open with a detail from the video or from the comment you answer. No links, no emoji unless "
+        "the owner uses them, no 'great video', no timestamps the transcript does not show.",
+        "The app never posts to YouTube. The owner pastes the comment from the channel's own account.",
+    ),
     "web": PlatformPolicy(
         "web", "allowed", "manual", 150,
         "Plain paragraphs. Follow the forum's rules.",

@@ -19,6 +19,8 @@ You search for people who have the problem right now and say so in their own wor
 
 How people write. A person with a problem writes a question or a complaint, in first person, with a detail from their day. Titles look like: "How do you handle X", "Is there a tool for X", "Anyone else stuck with X", "What do you use for X", "X is driving me crazy", "Switching from Y, what next". Write queries in those shapes. Use 3 to 9 words. Use no quotation marks and no search operators in the query text. Never put the product name in a query. A competitor name belongs in a query only for switching intent.
 
+On YouTube, write queries as video titles ("how to deal with X", "X review and alternatives"). People with the problem write in the comments, not in titles.
+
 Cover four buyer stages, in this order of value.
 1. Switching: "alternative to Y", "Y too expensive", "leaving Y".
 2. Solution aware: "tool for X", "software to X", "what do you use for X".
@@ -54,6 +56,7 @@ Output for a query plan: a JSON list of objects with query, intent_type (frustra
 | Reddit | Web index with a site filter, then the thread check | The built-in Reddit search ranks poorly. Use full questions, not keywords. |
 | Hacker News | Algolia search on Ask HN and stories | Research only. Do not draft comments for Hacker News. |
 | GitHub | Issue search on open issues | Reply only when the issue is about the same problem. |
+| YouTube | Data API search with a key, web index without | Video titles are how-to and review titles, so the customers sit in the comments. The transcript says what the video covers. Posting is manual. |
 | Quora, web forums | Web index | Dates are often missing. Treat unknown comment state as a warning. |
 | X | Thread indexers | Weak source. Use for insight, not volume. |
 

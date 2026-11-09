@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Tuple
 from agent_reach.team.models import Directive, Task
 
 # These stop a post for a while. The owner waits instead of fixing something.
-WAIT_CODES = frozenset({"daily_cap", "interval"})
+WAIT_CODES = frozenset({"daily_cap", "interval", "thread_gap"})
 INSPECTED_STATUSES = ("draft", "approved", "pending_manual_post")
 
 

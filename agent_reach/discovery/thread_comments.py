@@ -22,7 +22,7 @@ import requests
 
 from agent_reach.discovery.models import BusinessProfile, ReplyTarget
 from agent_reach.discovery.security import sanitize
-from agent_reach.discovery.thread_check import USER_AGENT, reddit_post_id
+from agent_reach.discovery.thread_check import USER_AGENT, reddit_post_id, youtube_video_id
 
 log = logging.getLogger("agent_reach.discovery")
 
@@ -174,8 +174,50 @@ def fetch_github_comments(url: str, session: Optional[requests.Session] = None, 
     return post, flat[:limit], []
 
 
-def fetch_comments(url: str, session: Optional[requests.Session] = None, limit: int = 80) -> Tuple[Dict[str, Any], List[Dict[str, Any]], List[str]]:
+def fetch_youtube_comments(
+    url: str, session: Optional[requests.Session] = None, limit: int = 50, storage: Any = None
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]], List[str]]:
+    """A video as the post, its top comments as targets. The post's `context` holds a transcript excerpt."""
+    from agent_reach.discovery import youtube
+
+    vid = youtube_video_id(url)
+    if not vid:
+        return {}, [], ["Not a YouTube video URL."]
+    api = youtube.YouTubeAPI(session, storage)
+    warnings: List[str] = []
+    prefs = (storage.get_setting("reply_preferences", {}) or {}) if storage is not None else {}
+    lang = str(prefs.get("language") or "en")
+    if not api.available():
+        return {}, [], ["YouTube comments need YOUTUBE_API_KEY. Reply at video level, or set the key."]
+    try:
+        video = api.videos([vid]).get(vid)
+        if not video:
+            return {}, [], ["YouTube did not return this video. It may be private or removed."]
+        channel_id = (video.get("snippet") or {}).get("channelId") or ""
+        try:
+            flat = youtube.flatten_comments(api.comment_threads(vid, min(limit, 100)), channel_id)
+        except youtube.YouTubeError as exc:
+            if exc.code != "comments_disabled":
+                raise
+            return {}, [], [str(exc)]
+    except youtube.YouTubeError as exc:
+        return {}, [], [f"YouTube comments unavailable: {exc}"]
+    title = str((video.get("snippet") or {}).get("title") or "")
+    tr = youtube.fetch_transcript(vid, [lang], translate_to=lang)
+    context = ""
+    if tr.get("ok"):
+        context = youtube.transcript_note(tr) + "\n" + youtube.excerpt(tr["segments"], title)
+    else:
+        warnings.append(f"No transcript: {tr.get('message')}")
+    return youtube.post_info(video, context), flat[:limit], warnings
+
+
+def fetch_comments(
+    url: str, session: Optional[requests.Session] = None, limit: int = 80, storage: Any = None
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]], List[str]]:
     low = (url or "").lower()
+    if "youtube.com" in low or "youtu.be" in low:
+        return fetch_youtube_comments(url, session, limit, storage)
     if "reddit.com" in low or "redd.it" in low:
         return fetch_reddit_comments(url, session, limit)
     if "news.ycombinator.com" in low:
@@ -207,6 +249,7 @@ def rank_targets(
 ) -> List[ReplyTarget]:
     """Score reply targets. The table matches skills/thread-engagement."""
     targets: List[ReplyTarget] = []
+    context = sanitize(post.get("context") or "", 900)
     thread_closed = bool(post.get("locked") or post.get("archived"))
     n_comments = int(post.get("num_comments") or len(comments) or 0)
 
@@ -222,7 +265,7 @@ def rank_targets(
         targets.append(ReplyTarget(
             target_kind="post", target_author=post.get("author") or "",
             target_text=sanitize((post.get("title") or "") + ". " + (post.get("selftext") or ""), 300)[:300],
-            reason=reason, score=base,
+            reason=reason, score=base, context=context,
         ))
     if thread_closed:
         return []
@@ -268,7 +311,7 @@ def rank_targets(
         targets.append(ReplyTarget(
             target_kind="comment", target_comment_id=str(c.get("id") or ""), target_author=author,
             target_text=body[:300], reason=reason.strip(), score=round(score, 2),
-            depth=int(c.get("depth") or 0), age_hours=round(age, 1) if age is not None else None,
+            depth=int(c.get("depth") or 0), age_hours=round(age, 1) if age is not None else None, context=context,
         ))
     targets.sort(key=lambda t: -t.score)
     return targets[:limit]

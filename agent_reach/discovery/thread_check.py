@@ -42,6 +42,7 @@ PLATFORM_MAX_AGE_DAYS: Dict[str, int] = {
     "twitter": 90,
     "quora": 730,
     "web": 365,
+    "youtube": 180,
 }
 
 # A thread with no replies after this many days counts as dead.
@@ -51,6 +52,7 @@ DEAD_THREAD_DAYS: Dict[str, int] = {
     "github": 60,
     "twitter": 14,
     "web": 30,
+    "youtube": 14,
 }
 
 # A thread this crowded buries a new reply.
@@ -72,6 +74,14 @@ def reddit_post_id(url: str) -> Optional[str]:
     return m.group(1).lower() if m else None
 
 
+_YT_ID = re.compile(r"(?:youtu\.be/|youtube(?:-nocookie)?\.com/(?:watch\?(?:[^#]*&)?v=|shorts/|embed/|live/|v/))([A-Za-z0-9_-]{11})")
+
+
+def youtube_video_id(url: str) -> Optional[str]:
+    m = _YT_ID.search(url or "")
+    return m.group(1) if m else None
+
+
 def canonical_url(url: str) -> str:
     """Collapse mirrors, tracking params and slugs so one thread has one key."""
     raw = (url or "").strip()
@@ -91,6 +101,10 @@ def canonical_url(url: str) -> str:
     if pid and (host.endswith("reddit.com") or host == "redd.it"):
         sub = _REDDIT_SUB.search(raw)
         return f"https://reddit.com/{sub.group(1).lower()}/comments/{pid}" if sub else f"https://reddit.com/comments/{pid}"
+
+    yt = youtube_video_id(raw)
+    if yt and (host.endswith("youtube.com") or host in ("youtu.be", "youtube-nocookie.com")):
+        return f"https://youtube.com/watch?v={yt}"
 
     if host in ("x.com", "twitter.com"):
         tid = _TWEET_ID.search(parts.path)
@@ -138,10 +152,11 @@ class ThreadHealth:
     kind: str = "discussion"
     warnings: List[str] = field(default_factory=list)
     reject: Optional[str] = None    # machine code. None means the thread passes.
+    crowd_limit: int = CROWDED_COMMENTS   # a video takes far more comments than a forum thread before a reply is buried
 
     @property
     def crowded(self) -> bool:
-        return (self.num_comments or 0) >= CROWDED_COMMENTS
+        return (self.num_comments or 0) >= self.crowd_limit
 
     def to_dict(self) -> Dict[str, Any]:
         return {

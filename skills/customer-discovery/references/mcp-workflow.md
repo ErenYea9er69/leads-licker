@@ -60,7 +60,7 @@ The rest of this page is the full mode sequence. Use it when a host AI (Claude C
 1. Load `platform-safety`.
 2. Show the owner each draft with the lead URL, the target comment and the lint result. They pick a version or edit the text.
 3. Call `reach_approve_reply` with `selected_version`. For an edited text, use `custom` and `edited_text`. The final text is linted again.
-4. Call `reach_publish_reply`. Gates run in order. A refusal names the gate, for example `rules_not_read`, `account_health`, `mention_ratio` or `thread_used`. Do not work around a gate. In manual mode the result holds the text to copy and a direct link to the thread or the comment.
+4. Call `reach_publish_reply`. Gates run in order. A refusal names the gate, for example `rules_not_read`, `account_health`, `mention_ratio` or `thread_account`. Do not work around a gate. In manual mode the result holds the text to copy and a direct link to the thread or the comment.
 5. The owner posts from their own account. After they say it is posted, call `reach_confirm_posted` with the comment URL.
 
 ## 7. Report

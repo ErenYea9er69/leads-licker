@@ -19,7 +19,7 @@ from agent_reach.discovery.security import sanitize
 log = logging.getLogger("agent_reach.discovery")
 
 DEFAULT_PLATFORMS = ["reddit", "hackernews", "web"]
-VALID_PLATFORMS = {"reddit", "hackernews", "web", "quora", "twitter", "github"}
+VALID_PLATFORMS = {"reddit", "hackernews", "web", "quora", "twitter", "github", "youtube"}
 MAX_QUERIES = 24
 MAX_PER_PLATFORM = 8
 PER_STAGE_PER_PLATFORM = 2
@@ -183,6 +183,10 @@ class SearchPlanner:
                 out["twitter"].append(self._q(f"struggling with {kw}", "frustration", "twitter", None, pain))
             if "github" in chosen and i == 0:
                 out["github"].append(self._q(kw, "tool_request", "github", None, pain))
+            if "youtube" in chosen and i < 2:
+                # Video titles are how-to and review titles. The customers sit in the comments.
+                out["youtube"].append(self._q(f"how to deal with {kw}", "tool_request", "youtube", None, pain))
+                out["youtube"].append(self._q(f"{kw} problem", "frustration", "youtube", None, pain))
 
     @staticmethod
     def _is_product_name(name: str) -> bool:
@@ -202,6 +206,8 @@ class SearchPlanner:
                 out["hackernews"].append(self._q(f"alternative to {name}", "alternative", "hackernews", None, why))
             if "quora" in chosen:
                 out["quora"].append(self._q(f"alternative to {name}", "alternative", "quora", None, why))
+            if "youtube" in chosen:
+                out["youtube"].append(self._q(f"{name} review and alternatives", "alternative", "youtube", None, why))
 
     def _outcome_queries(self, profile, chosen, subs, out) -> None:
         for outcome in profile.customer_outcomes[:2]:

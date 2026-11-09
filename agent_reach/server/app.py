@@ -18,12 +18,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from agent_reach import __version__
-from agent_reach.discovery import skillpack, voice
 from agent_reach.discovery.llm_client import LLMProviderError
 from agent_reach.discovery.models import (
     BusinessProfile,
     PostingSettings,
-    ReplyPreferences,
 )
 from agent_reach.discovery.orchestrator import DiscoveryOrchestrator, validate_platforms
 from agent_reach.discovery.reply_generator import ReplyGenerationError
@@ -144,13 +142,6 @@ class LaunchCampaignRequest(BaseModel):
 class ApproveReplyRequest(BaseModel):
     edited_reply: Optional[str] = None
     selected_version: Optional[str] = "value_first"
-
-
-class LintRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=10000)
-    kind: Optional[str] = "value_first"
-    platform: Optional[str] = "reddit"
-    lead_id: Optional[str] = None
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -344,46 +335,14 @@ def approve_reply(lead_id: str, req: ApproveReplyRequest):
     reply = storage.get_reply_by_lead_id(lead_id)
     if not reply:
         raise HTTPException(status_code=404, detail="Reply not found")
-    profile = storage.get_latest_business_profile()
     try:
         reply = orchestrator.reply_generator.approve_reply(
-            reply,
-            edited_text=req.edited_reply,
-            selected_version=req.selected_version,
-            profile=profile,
+            reply, edited_text=req.edited_reply, selected_version=req.selected_version
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     storage.save_reply(reply)
     return {"ok": True, "reply": reply.model_dump()}
-
-
-# ── Endpoints: Voice & Copywriting Linter ──
-
-@app.post("/api/voice/lint")
-def lint_text(req: LintRequest):
-    profile = storage.get_latest_business_profile()
-    product_name = profile.name if profile else ""
-    lead = storage.get_lead(req.lead_id) if req.lead_id else None
-    platform = lead.platform if lead else (req.platform or "reddit")
-    prefs = ReplyPreferences()
-    report = voice.lint_reply(
-        req.text,
-        kind=req.kind or "value_first",
-        product_name=product_name,
-        prefs=prefs,
-        platform=platform,
-    )
-    return report.to_dict()
-
-
-@app.get("/api/voice/disclosures")
-def get_disclosures():
-    profile = storage.get_latest_business_profile()
-    product_name = profile.name if profile else "the product"
-    pool = skillpack.disclosure_phrases()
-    phrases = [p.replace("{product}", product_name) for p in pool]
-    return {"phrases": phrases}
 
 
 @app.post("/api/replies/{lead_id}/publish")
@@ -503,6 +462,7 @@ def list_platforms():
         "platforms": sorted(VALID_PLATFORMS),
         "default": ["reddit", "hackernews", "web"],
         "weak": ["twitter", "github"],
+        "needs_key": ["youtube"],
     }
 
 

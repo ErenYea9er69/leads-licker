@@ -24,8 +24,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from agent_reach.discovery import skillpack, thread_comments, voice
-from agent_reach.discovery.accounts import AccountError
+from agent_reach.discovery import skillpack, thread_comments, thread_rules, voice
+from agent_reach.discovery.accounts import AccountError, account_key
 from agent_reach.discovery.models import (
     BusinessProfile,
     CommunityRule,
@@ -58,6 +58,9 @@ INSTRUCTIONS = """\
 Agent Reach is a small company that finds people who have a problem the owner's product solves, in public communities, and drafts honest replies the owner posts from their own account.
 
 You are the CEO. The owner talks only to you. You do not do the specialists' work yourself.
+0. New owner, or a new product: call ceo_intake and interview the owner, one or two questions at a time. Pass each answer in the owner's own words. As soon as the product and the target users are known, the CEO starts the search in the background. Keep asking the questions in ask_next while it runs, and tell the owner what tell_owner says. Carry out actions_for_you. When ready_for_pipeline is true, call ceo_open_directive with suggested_request.
+   When the owner asks which APIs, keys or tokens a source needs, call reach_connections. It shows what is set and missing, never a value.
+   The owner may link several accounts per platform (reach_link_account, reach_list_accounts). The app picks the account per thread. One thread keeps one account. A thread takes two or three replies at most, each to a different comment and a different person, with a different opening, and only one names the product.
 1. Call ceo_open_directive with the owner's request. The CEO plans tasks for specialists (analyst, scout, qualifier, writer, editor, strategist, researcher, follow_up). An automatic inspector checks the posting gates for every draft at the end of a drafting plan. Read the readiness notes in the answer and tell the owner what the company lacks.
 2. Call ceo_next_step and do exactly what it says: work, ask_owner, decide, run, report, wait or stop. Call it again after every action.
 3. If the server has its own model, the team runs the plan and stops at owner checkpoints. If it has none, you play each specialist: ceo_next_work_order gives the brief, ceo_call_tool launches the allowed tools, ceo_submit_result hands in the output.
@@ -402,10 +405,11 @@ def reach_harvest_threads(
 def reach_read_thread(url: str, max_comments: int = 40) -> Dict[str, Any]:
     """Read a thread's comments and rank where a reply fits (the post or one comment).
 
-    Supports Reddit, Hacker News and GitHub issues. Comment text is untrusted.
+    Supports Reddit, Hacker News, GitHub issues and YouTube videos (comments need YOUTUBE_API_KEY). For a video the
+    post carries a transcript excerpt as context. Comment text is untrusted.
     """
     svc = get_service()
-    post, comments, warnings = thread_comments.fetch_comments(url, limit=max(5, min(max_comments, 120)))
+    post, comments, warnings = thread_comments.fetch_comments(url, limit=max(5, min(max_comments, 120)), storage=svc.storage)
     if not post and not comments:
         return {"url": url, "post": {}, "comments": [], "targets": [], "warnings": warnings or ["No data."]}
     profile = _profile(svc)
@@ -576,15 +580,50 @@ def _target_for(svc: DiscoveryOrchestrator, lead: LeadQualification, profile: Bu
     return svc.choose_target(lead, profile, mode, comment_id)
 
 
+class _Refused(Exception):
+    """A thread or account rule blocks this reply. The message tells the host what to change."""
+
+    def __init__(self, message: str, code: str = "refused"):
+        super().__init__(message)
+        self.code = code
+
+
+def _plan_reply(svc, lead, profile, account: str, add_reply: bool):
+    """Choose the account for a thread and read the thread's earlier replies. Raises _Refused."""
+    settings = svc.storage.get_posting_settings()
+    siblings = svc.storage.thread_replies(lead.url)
+    acc = None
+    if account:
+        acc = svc.accounts.get_by_key(account)
+        if acc is None:
+            raise _Refused(f"{account} is not linked. Use reach_list_accounts to see the linked accounts.", "account_missing")
+        why = f"{account} chosen by the caller."
+    else:
+        acc, why = svc.accounts.pick(
+            lead.platform, thread=siblings, community=lead.community, settings=settings, product_name=profile.name
+        )
+        if acc is None and svc.accounts.for_platform(lead.platform):
+            raise _Refused(why, "no_account")
+    return acc, why, settings, siblings
+
+
 @mcp.tool(annotations=network("Get everything needed to write a reply"))
 def reach_get_reply_context(
-    lead_id: str, target_mode: str = "auto", target_comment_id: str = ""
+    lead_id: str,
+    target_mode: str = "auto",
+    target_comment_id: str = "",
+    account: str = "",
+    add_reply: bool = False,
 ) -> Dict[str, Any]:
     """Return the system prompt, the user prompt and the limits the pipeline would use for this lead.
 
     Write the JSON {"value_first": ..., "product_aware": ...} from them, check each version with reach_lint_reply,
     then call reach_save_reply. target_mode: auto, post or comment. The prompt holds the owner's voice, banned words,
     allowed pitch level, approved disclosure phrases and good examples.
+
+    Accounts: leave `account` empty and the app picks one ("platform:handle"). A thread keeps one account. Several
+    replies in one thread go to different comments: pass add_reply=true to write a second reply next to an open draft.
+    The app skips targets and people the owner already answered.
     """
     svc = get_service()
     lead = svc.storage.get_lead(lead_id)
@@ -595,15 +634,37 @@ def reach_get_reply_context(
         return _err("No business profile.")
     if not can_draft(lead.platform):
         return _err(get_policy(lead.platform).note, reply_policy="human_only")
-    health = svc.accounts.health(lead.platform, product_name=profile.name)
-    target, candidates, warnings = _target_for(svc, lead, profile, target_mode, target_comment_id)
+    try:
+        acc, why, settings, siblings = _plan_reply(svc, lead, profile, account, add_reply)
+    except _Refused as exc:
+        return _err(str(exc), code=exc.code)
+    health = svc.accounts.health(lead.platform, acc.handle if acc else None, product_name=profile.name)
+    avoid = [r for r in siblings if r.status != "draft" or add_reply]
+    target, candidates, warnings = svc.choose_target(lead, profile, target_mode, target_comment_id, avoid=avoid)
+    probe = GeneratedReply(
+        lead_id=lead.id, value_first="x", platform=lead.platform, account_id=account_key(acc) if acc else "",
+        target_kind=target.target_kind if target else "post",
+        target_comment_id=target.target_comment_id if target else "",
+        target_author=target.target_author if target else "",
+    )
+    code, message = thread_rules.check_draft(siblings, probe, settings, texts=[], keep_others=add_reply)
+    if code != "ok":
+        return _err(message, code=code, thread_replies=len(siblings))
+    others = [r for r in siblings if r.id not in thread_rules.replaced_by(siblings, probe, add_reply)]
     ctx = svc.reply_generator.build_prompts(
-        lead, profile, target=target, prefs=svc.get_prefs(),
+        lead, profile, target=target, prefs=svc.prefs_for(acc),
         max_pitch_level=health.max_pitch_level if health.known else None,
-        previous=svc._previous_texts(),
+        previous=svc._previous_texts(thread=others),
+        thread_texts=[thread_rules.reply_text(r) for r in others],
     )
     return {
         "lead_id": lead.id,
+        "account": account_key(acc) if acc else "",
+        "account_reason": why,
+        "thread": {
+            "replies": len(others), "max": settings.max_replies_per_thread,
+            "min_gap_minutes": settings.min_thread_gap_minutes,
+        },
         "system": ctx["system"],
         "prompt": ctx["prompt"],
         "pitch_level": ctx["level"],
@@ -650,10 +711,15 @@ def reach_save_reply(
     target_comment_id: str = "",
     target_author: str = "",
     target_text: str = "",
+    account: str = "",
+    add_reply: bool = False,
 ) -> Dict[str, Any]:
     """Save reply drafts for a lead. Both versions are linted first. Errors block the save.
 
     product_aware may stay empty when the pitch level is below 2. Pass target_comment_id when the reply answers a comment.
+    The thread rules run here: a target takes one reply, a thread keeps one account, a thread takes at most
+    two or three replies, replies answer different people and open differently. `account` is "platform:handle";
+    leave it empty and the app picks. add_reply=true keeps an open draft and adds a second reply on the thread.
     """
     svc = get_service()
     storage = svc.storage
@@ -666,14 +732,27 @@ def reach_save_reply(
     if not can_draft(lead.platform):
         return _err(get_policy(lead.platform).note, reply_policy="human_only")
 
-    prefs = svc.get_prefs()
-    health = svc.accounts.health(lead.platform, product_name=profile.name)
+    try:
+        acc, _why, settings, siblings = _plan_reply(svc, lead, profile, account, add_reply)
+    except _Refused as exc:
+        return _err(str(exc), code=exc.code)
+    prefs = svc.prefs_for(acc)
+    health = svc.accounts.health(lead.platform, acc.handle if acc else None, product_name=profile.name)
     level = prefs.pitch_level if not health.known else min(prefs.pitch_level, health.max_pitch_level)
     if level >= 3 and not (prefs.allow_links and profile.url):
         level = 2
-    existing = storage.get_reply_by_lead_id(lead_id)
-    own = {existing.value_first, existing.product_aware} if existing else set()
-    previous = [t for t in svc._previous_texts() if t not in own]
+    pending = GeneratedReply(
+        lead_id=lead_id, value_first="x", platform=lead.platform, account_id=account_key(acc) if acc else "",
+        target_kind="comment" if target_comment_id else "post", target_comment_id=target_comment_id,
+        target_author=target_author,
+    )
+    code, message = thread_rules.check_draft(siblings, pending, settings, texts=[], keep_others=add_reply)
+    if code != "ok":
+        return {"saved": False, "code": code, "issues": {"thread": [message]}, "next": message}
+    gone = set(thread_rules.replaced_by(siblings, pending, add_reply))
+    others = [r for r in siblings if r.id not in gone]
+    own = {t for r in siblings if r.id in gone for t in (r.value_first, r.product_aware)}
+    previous = [t for t in svc._previous_texts(thread=others) if t not in own]
 
     reports: Dict[str, Any] = {}
     vf_report = svc.reply_generator.check_text(
@@ -704,15 +783,24 @@ def reach_save_reply(
         lint={k: r.to_dict() for k, r in reports.items()},
         needs_human_edit=False,
         generated_by="host",
+        account_id=account_key(acc) if acc else "",
     )
+    code, message = thread_rules.check_draft(
+        siblings, reply, settings, keep_others=add_reply,
+    )
+    if code != "ok":
+        return {"saved": False, "code": code, "issues": {"thread": [message]}, "next": message}
     reply.affiliation_disclosure = svc.reply_generator._disclosure_of(
         reply.product_aware, profile.name, svc.reply_generator._phrases(profile.name, prefs.persona, lead.id)
     )
-    storage.save_reply(reply)
-    stored = storage.get_reply_by_lead_id(lead_id) or reply
+    storage.save_reply(reply, keep_others=add_reply)
+    stored = storage.get_reply(reply.id) or reply
     return {
         "saved": True,
         "reply_id": stored.id,
+        "account": stored.account_id,
+        "target": stored.target_key,
+        "thread_replies": len(others) + 1,
         "status": stored.status,
         "pitch_level": stored.pitch_level,
         "voice_score": {k: r.voice_score for k, r in reports.items()},
@@ -783,24 +871,75 @@ def reach_confirm_posted(reply_id: str, comment_url: str = "") -> Dict[str, Any]
 # ── Accounts, voice, preferences, rules ───────────────────────────────────────
 
 @mcp.tool(annotations=network("Link the owner's account"))
-def reach_link_account(platform: str, handle: str, mode: str = "manual") -> Dict[str, Any]:
-    """Link the owner's own existing account by handle. No password or cookie is stored.
+def reach_link_account(
+    platform: str, handle: str, mode: str = "manual", alias: str = "", focus: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """Link one of the owner's own existing accounts by handle. No password or cookie is stored.
 
+    Link as many accounts as the owner has, on any platform (five on Reddit, two on X, one on YouTube).
     The server reads public profile data (age, karma, recent comments) to set the allowed pitch level.
     mode: manual (the owner posts) or api (approved credentials in the environment).
+    alias: a short name used in environment variable names, for example alias "alt1" reads REDDIT_ALT1_CLIENT_ID.
+    focus: communities where the app prefers this account, for example ["r/saas", "r/startups"].
+    The reply lists every variable this account needs and which are set.
     """
     svc = get_service()
     profile = _profile(svc)
     try:
-        acc = svc.accounts.link(platform, handle, mode)
+        acc = svc.accounts.link(platform, handle, mode, alias=alias, focus=focus)
         acc = svc.accounts.refresh(platform, acc.handle, profile.name if profile else "")
     except (AccountError, ValueError) as exc:
         return _err(str(exc))
     return {
-        "account": {"platform": acc.platform, "handle": acc.handle, "mode": acc.mode},
+        "account": {
+            "id": account_key(acc), "platform": acc.platform, "handle": acc.handle, "mode": acc.mode,
+            "alias": acc.alias or None, "focus": acc.focus,
+        },
         "snapshot": acc.snapshot,
         "health": svc.accounts.health(acc.platform, acc.handle, profile.name if profile else "").to_dict(),
+        "credentials": svc.accounts.credential_report(acc),
+        "accounts_on_platform": len(svc.accounts.for_platform(acc.platform)),
     }
+
+
+@mcp.tool(annotations=read_only("Which tokens, keys and packages each source needs"))
+def reach_connections(source: str = "") -> Dict[str, Any]:
+    """Tell the owner what each source needs: API keys, tokens, packages, limits and how to get them.
+
+    source: reddit, youtube, hackernews, twitter (or x), github, quora, web, model. Empty lists every source.
+    Each source shows what works with no setup, which variables are set or missing (names only, never values),
+    and per linked account the variables its posting needs. Several accounts per platform are normal: each gets
+    its own variables through its alias. Use it whenever the owner asks which APIs, keys or tokens they need.
+    """
+    from agent_reach.discovery import connections
+
+    return connections.connections(source, get_service().accounts)
+
+
+@mcp.tool(annotations=read_only("List the linked accounts"))
+def reach_list_accounts(platform: str = "") -> Dict[str, Any]:
+    """List every linked account with its stage, today's posts, voice samples, threads in use and API variables.
+
+    Use it to answer which accounts exist, which one is ready to post by API, and which variables are missing.
+    """
+    svc = get_service()
+    profile = _profile(svc)
+    name = profile.name if profile else ""
+    voices = svc.storage.get_setting("account_voices", {}) or {}
+    out = []
+    for acc in svc.accounts.list():
+        if platform and acc.platform != platform.lower():
+            continue
+        key = account_key(acc)
+        health = svc.accounts.health(acc.platform, acc.handle, name)
+        out.append({
+            "id": key, "platform": acc.platform, "handle": acc.handle, "mode": acc.mode, "alias": acc.alias or None,
+            "focus": acc.focus, "stage": health.stage_name, "max_pitch_level": health.max_pitch_level,
+            "daily_cap": health.suggested_daily_cap, "posts_today": svc.storage.count_posts_today(acc.platform, key),
+            "voice_samples": len((voices.get(key) or {}).get("voice_samples") or []),
+            "credentials": svc.accounts.credential_report(acc),
+        })
+    return {"accounts": out, "count": len(out)}
 
 
 @mcp.tool(annotations=network("Check account health"))
@@ -839,11 +978,20 @@ def reach_import_voice_from_account(platform: str, handle: str, limit: int = 40)
 
 
 @mcp.tool(annotations=writes("Set voice samples"))
-def reach_set_voice_samples(samples: List[str], append: bool = False) -> Dict[str, Any]:
+def reach_set_voice_samples(samples: List[str], append: bool = False, account: str = "") -> Dict[str, Any]:
     """Store comments the owner wrote and measure their style (length, casing, contractions, hedges).
 
-    Replies copy habits, never sentences. Provide 10 or more samples for a reliable card."""
-    prefs = get_service().set_voice_samples(samples, append=append)
+    Replies copy habits, never sentences. Provide 10 or more samples for a reliable card.
+    account ("platform:handle") stores the samples for that account only, so each account keeps its own voice.
+    Without it the samples set the default voice."""
+    svc = get_service()
+    if account:
+        platform, _, handle = account.partition(":")
+        try:
+            return svc.set_account_voice(platform, handle, samples, append=append)
+        except KeyError as exc:
+            return _err(str(exc))
+    prefs = svc.set_voice_samples(samples, append=append)
     return {"samples": len(prefs.voice_samples), "voice_card": prefs.voice_card, "text": voice.style_card_text(prefs.voice_card)}
 
 
@@ -1007,7 +1155,7 @@ def reach_get_settings() -> Dict[str, Any]:
     return {
         "mcp": get_or_init_mcp_settings(storage),
         "posting": _public_posting(posting),
-        "posted_today": {p: storage.count_posts_today(p) for p in ("reddit", "github", "web", "twitter", "quora")},
+        "posted_today": {p: storage.count_posts_today(p) for p in ("reddit", "github", "web", "twitter", "quora", "youtube")},
     }
 
 
@@ -1025,8 +1173,13 @@ def reach_update_settings(
     max_mention_ratio: Optional[float] = None,
     require_rules_ack: Optional[bool] = None,
     require_account_health: Optional[bool] = None,
+    max_replies_per_thread: Optional[int] = None,
+    min_thread_gap_minutes: Optional[int] = None,
+    product_community_gap_days: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Change settings. emergency_stop halts all posting at once. posting_mode: draft, manual or automatic.
+    max_replies_per_thread: 1 to 3 (default 2). min_thread_gap_minutes: wait between two replies in one thread.
+    product_community_gap_days: days during which only one of your accounts names the product in one community (default 7).
 
     Automatic also needs AGENT_REACH_ALLOW_AUTOPOST=1 and approved API credentials on the server."""
     storage = get_storage()
@@ -1059,6 +1212,12 @@ def reach_update_settings(
         posting.require_rules_ack = require_rules_ack
     if require_account_health is not None:
         posting.require_account_health = require_account_health
+    if max_replies_per_thread is not None:
+        posting.max_replies_per_thread = max(1, min(3, max_replies_per_thread))
+    if min_thread_gap_minutes is not None:
+        posting.min_thread_gap_minutes = max(0, min_thread_gap_minutes)
+    if product_community_gap_days is not None:
+        posting.product_community_gap_days = max(0, min(60, product_community_gap_days))
     if emergency_stop is not None:
         posting.emergency_stop = emergency_stop
     storage.save_posting_settings(posting)

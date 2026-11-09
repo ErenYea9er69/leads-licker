@@ -53,13 +53,24 @@ _NUMBER_WORDS = {
 _WORD_RE = re.compile(r"[a-z]+")
 
 
+# Ids and timestamps hold random digit runs. A run such as "30" inside a UUID must never make an invented
+# number look supported, so they are removed before numbers are read. Both sides of a comparison use this.
+_IDENTIFIERS = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"   # uuid
+    r"|\b[a-z]+_[0-9a-f]{6,}\b"                                             # task_a7a48887d8, run_...
+    r"|\b[0-9a-f]{12,}\b"                                                   # long hex ids and hashes
+    r"|\b\d{9,}(?:\.\d+)?\b",                                              # unix timestamps
+    re.I,
+)
+
+
 def numbers_in(text: str) -> Set[str]:
     """Numbers with two or more digits, plus spelled numbers such as forty or hundred.
 
     Single digits are too common to check. Both sides of a comparison go through this function,
     so "forty" in a claim matches "40" in a source.
     """
-    flat = (text or "").replace(",", "")
+    flat = _IDENTIFIERS.sub(" ", (text or "")).replace(",", "")
     found = {n for n in _NUM_RE.findall(flat) if len(n.replace(".", "")) >= 2}
     for word in _WORD_RE.findall(flat.lower()):
         value = _NUMBER_WORDS.get(word)

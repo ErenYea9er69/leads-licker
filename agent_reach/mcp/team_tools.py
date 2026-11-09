@@ -14,11 +14,17 @@ from typing import Any, Dict, List, Optional
 from agent_reach.mcp.compat import network, read_only, writes
 from agent_reach.mcp.server import get_service, mcp
 from agent_reach.team.engine import TeamEngine
+from agent_reach.team.intake import Intake
 from agent_reach.team.roles import WORKER_ONLY_TOOLS
 
 log = logging.getLogger("agent_reach.mcp")
 
 _engine: Optional[TeamEngine] = None
+
+
+def get_intake() -> Intake:
+    """The interview. It shares the engine and the server's current service."""
+    return Intake(get_service, get_engine())
 
 
 def get_engine() -> TeamEngine:
@@ -46,6 +52,25 @@ def ceo_open_directive(request: str, intent: str = "", playbook: str = "", auto_
     if not engine.llm_ready():
         return {**opened, "mode": "host", "next": "Call ceo_next_step with the directive_id and do what it says."}
     return {**opened, **engine.run(opened["directive_id"])}
+
+
+@mcp.tool(annotations=network("CEO: interview the owner and start work while they answer"))
+def ceo_intake(
+    answers: Optional[Dict[str, str]] = None, skip: Optional[List[str]] = None, wait: bool = False
+) -> Dict[str, Any]:
+    """Run the owner interview. Call it at the start of a new project and after every answer the owner gives.
+
+    answers: the owner's own words per question. Keys: product, target_users, problems, platforms, competitors,
+    site, accounts, voice, language, rules, posting. Pass only what the owner said. Never fill a gap yourself.
+    skip: question keys the owner declined. wait: true waits for the background search (tests and scripts only).
+
+    The CEO starts the search on its own once it knows the product and the target users. The search runs in the
+    background while you ask the next one or two questions in ask_next, so the owner never waits. Questions the
+    search does not need come first while it runs. With a server model the CEO also starts the full plan.
+    The answer lists the jobs and what they found, what to tell the owner, the next questions and
+    actions_for_you (link accounts, store voice samples, set the language). Read tell_owner to the owner.
+    """
+    return get_intake().turn(answers, skip, wait=wait)
 
 
 @mcp.tool(annotations=read_only("CEO: status of the company"))

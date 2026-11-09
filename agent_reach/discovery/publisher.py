@@ -9,11 +9,12 @@ Gate order, first failure wins:
   5. content lint (banned words, dashes, markdown, links, affiliation, length)
   6. community rules the owner recorded (self promotion, AI content, links, karma)
   7. optional community whitelist
-  8. one reply per thread
+  8. thread rules (one account per thread, a target takes one reply, at most two or three replies,
+     different openings, one product mention, a gap between replies; see thread_rules.py)
   9. account health (pitch level allowed by age and karma)
-  10. product mention ratio (at most one product reply in ten)
-  11. daily cap (the lower of the owner's cap and the account's cap)
-  12. gap between posts, with jitter
+  10. product mention ratio (at most one product reply in ten, counted per account)
+  11. daily cap (the lower of the owner's cap and the account's cap, counted per account)
+  12. gap between posts on the platform, with jitter, across all the owner's accounts
   13. thread still open (Reddit and GitHub, live check)
 
 Manual mode never calls a platform API. It returns text and a direct link, and
@@ -32,8 +33,8 @@ from typing import Any, Dict, Optional, Tuple
 
 import requests
 
-from agent_reach.discovery import voice
-from agent_reach.discovery.accounts import AccountService
+from agent_reach.discovery import thread_rules, voice
+from agent_reach.discovery.accounts import AccountService, account_key
 from agent_reach.discovery.models import (
     BusinessProfile,
     GeneratedReply,
@@ -43,7 +44,12 @@ from agent_reach.discovery.models import (
 )
 from agent_reach.discovery.platform_policy import can_auto_post, can_draft, get_policy
 from agent_reach.discovery.storage import DiscoveryStorage
-from agent_reach.discovery.thread_check import RedditMeta, judge_reddit, reddit_post_id
+from agent_reach.discovery.thread_check import (
+    RedditMeta,
+    judge_reddit,
+    reddit_post_id,
+    youtube_video_id,
+)
 
 _GITHUB_ISSUE = re.compile(r"github\.com/([^/]+)/([^/]+)/issues/(\d+)")
 
@@ -66,6 +72,25 @@ class CommunityPublisher:
         self.session = session or requests.Session()
         self.profile = profile
         self.prefs = prefs
+
+    def _accounts(self) -> AccountService:
+        return AccountService(self.storage, self.session)
+
+    def resolve_account(self, reply: GeneratedReply, lead: LeadQualification):
+        """Return (account, error_code, message). The reply's own account wins. A single linked account is the default."""
+        svc = self._accounts()
+        if reply.account_id:
+            acc = svc.get_by_key(reply.account_id)
+            if acc is None:
+                return None, "account_missing", f"{reply.account_id} is not linked any more. Link it again or choose another account."
+            return acc, "", ""
+        linked = svc.for_platform(lead.platform)
+        if len(linked) > 1:
+            return None, "account_needed", (
+                f"{len(linked)} {lead.platform} accounts are linked. Save the reply with an account, "
+                "or let the app pick one, before publishing."
+            )
+        return (linked[0] if linked else None), "", ""
 
     # ── Gates ──
 
@@ -117,13 +142,20 @@ class CommunityPublisher:
             if lead.community.lower().removeprefix("r/") not in allowed:
                 return "not_whitelisted", f"{lead.community} is not in the allowed communities."
 
-        if reply.status != "pending_manual_post" and self.storage.has_published_url(lead.url):
-            return "thread_used", "A reply already went out on this thread. Do not post twice in one thread."
+        code, message = thread_rules.check_publish(
+            self.storage.thread_replies(lead.url), reply, kind, text, settings,
+            product_name=self.profile.name if self.profile else "",
+        )
+        if code != "ok":
+            return code, message
 
+        account, err_code, err_msg = self.resolve_account(reply, lead)
+        if err_code:
+            return err_code, err_msg
+        own_key = account_key(account) if account is not None and reply.account_id else None
         health = None
-        account = AccountService(self.storage, self.session).get(lead.platform)
         if account is not None or settings.require_account_health:
-            health = AccountService(self.storage, self.session).health(
+            health = self._accounts().health(
                 lead.platform, account.handle if account else None, self.profile.name if self.profile else ""
             )
         if kind == "product_aware" and health is not None:
@@ -142,15 +174,25 @@ class CommunityPublisher:
                     return "rules_min_karma", f"{lead.community} wants {rule.min_karma} karma. The account has {karma}."
 
         if kind == "product_aware" and settings.max_mention_ratio < 1:
-            blocked = self._mention_gate(lead.platform, settings, account.snapshot if account else {})
+            blocked = self._mention_gate(lead.platform, settings, account.snapshot if account else {}, own_key)
             if blocked:
                 return "mention_ratio", blocked
+
+        if kind == "product_aware" and settings.product_community_gap_days:
+            others = [a for a in self.storage.product_posters(lead.platform, lead.community, settings.product_community_gap_days) if a != (own_key or "")]
+            if others:
+                return "community_overlap", (
+                    f"{others[0] or 'Another account of yours'} named the product in {lead.community} in the last "
+                    f"{settings.product_community_gap_days} days. Two of your accounts naming it in one community looks coordinated. "
+                    "Use the value-first version here, or wait."
+                )
 
         cap = settings.daily_limit
         if health is not None and health.known:
             cap = min(cap, health.suggested_daily_cap)
-        if self.storage.count_posts_today(lead.platform) >= cap:
-            return "daily_cap", f"Daily limit of {cap} reached for {lead.platform}."
+        if self.storage.count_posts_today(lead.platform, own_key) >= cap:
+            who = f"{own_key}" if own_key else lead.platform
+            return "daily_cap", f"Daily limit of {cap} reached for {who}."
 
         last = self.storage.last_published_at(lead.platform)
         if last and settings.min_interval_seconds > 0:
@@ -166,9 +208,11 @@ class CommunityPublisher:
         code, message = self.gate(reply, lead, settings)
         return code == "ok", message
 
-    def _mention_gate(self, platform: str, settings: PostingSettings, snapshot: Dict[str, Any]) -> str:
+    def _mention_gate(
+        self, platform: str, settings: PostingSettings, snapshot: Dict[str, Any], account_id: Optional[str] = None
+    ) -> str:
         """At most `max_mention_ratio` of recent comments may name the product, this one included."""
-        kinds = self.storage.recent_published_kinds(platform, limit=30)
+        kinds = self.storage.recent_published_kinds(platform, limit=30, account_id=account_id)
         app_total, app_pa = len(kinds), sum(1 for k in kinds if k == "product_aware")
         snap_total = int(snapshot.get("recent_comment_count") or 0)
         snap_pa = round((snapshot.get("recent_mention_ratio") or 0) * snap_total)
@@ -202,9 +246,11 @@ class CommunityPublisher:
         kind = self._kind_of(reply, self._get_reply_content(reply))
         if code != "ok":
             self.storage.log_post(
-                lead.id, reply.id, lead.platform, lead.url, "", settings.mode, "rejected", reason, kind=kind
+                lead.id, reply.id, lead.platform, lead.url, "", settings.mode, "rejected", reason, kind=kind,
+                account_id=reply.account_id,
             )
             return {"success": False, "reason": reason, "code": code}
+        account, _, _ = self.resolve_account(reply, lead)
 
         content = self._final_content(reply)
         note = ""
@@ -213,22 +259,27 @@ class CommunityPublisher:
                 note = "Automatic posting needs AGENT_REACH_ALLOW_AUTOPOST=1 in the environment. Falling back to manual."
             elif not can_auto_post(lead.platform):
                 note = f"{lead.platform} has no approved posting API in this app. Falling back to manual."
-            elif lead.platform == "reddit" and self._reddit_creds(settings):
-                return self._publish_reddit_api(reply, lead, content, settings, kind)
-            elif lead.platform == "github" and (settings.github_token or os.getenv("GITHUB_TOKEN")):
-                return self._publish_github_api(reply, lead, content, settings, kind)
+            elif lead.platform == "reddit" and self._reddit_creds(settings, account):
+                return self._publish_reddit_api(reply, lead, content, settings, kind, account)
+            elif lead.platform == "github" and self._github_token(settings, account):
+                return self._publish_github_api(reply, lead, content, settings, kind, account)
             else:
                 note = "No API credentials in the environment. Falling back to manual."
 
         reply.status = "pending_manual_post"
         self.storage.save_reply(reply)
         self.storage.log_post(
-            lead.id, reply.id, lead.platform, lead.url, content, settings.mode, "pending_manual_post", kind=kind
+            lead.id, reply.id, lead.platform, lead.url, content, settings.mode, "pending_manual_post", kind=kind,
+            account_id=reply.account_id,
         )
         return {
             "success": True,
             "action": "copy_and_open",
-            "message": "Copy the reply, post it from your own account, then confirm.",
+            "message": (
+                f"Copy the reply, post it from {reply.account_id.split(':', 1)[1]}, then confirm."
+                if reply.account_id else "Copy the reply, post it from your own account, then confirm."
+            ),
+            "account": reply.account_id,
             "note": note,
             "target_url": self._target_link(reply, lead),
             "text": content,
@@ -250,6 +301,7 @@ class CommunityPublisher:
         self.storage.log_post(
             lead.id, reply.id, lead.platform, lead.url, content,
             "manual", "published", "Confirmed by the user", kind=self._kind_of(reply, content),
+            account_id=reply.account_id,
         )
         return {"success": True, "reply": reply.model_dump()}
 
@@ -280,12 +332,20 @@ class CommunityPublisher:
             pid = reddit_post_id(lead.url)
             if pid:
                 return f"https://www.reddit.com/comments/{pid}/_/{reply.target_comment_id}/"
+        if lead.platform == "youtube":
+            from agent_reach.discovery import youtube
+
+            vid = youtube_video_id(lead.url)
+            if vid:
+                return youtube.comment_link(vid, reply.target_comment_id if reply.target_kind == "comment" else "")
         return lead.url
 
     # ── Reddit ──
 
-    @staticmethod
-    def _reddit_creds(settings: PostingSettings) -> Optional[Dict[str, str]]:
+    def _reddit_creds(self, settings: PostingSettings, account=None) -> Optional[Dict[str, str]]:
+        """Credentials for one linked account, else the single set in the environment."""
+        if account is not None:
+            return self._accounts().credentials(account)
         creds = {
             "client_id": settings.reddit_client_id or os.getenv("REDDIT_CLIENT_ID") or "",
             "client_secret": settings.reddit_client_secret or os.getenv("REDDIT_CLIENT_SECRET") or "",
@@ -294,14 +354,21 @@ class CommunityPublisher:
         }
         return creds if all(creds.values()) else None
 
+    def _github_token(self, settings: PostingSettings, account=None) -> Optional[str]:
+        if account is not None:
+            creds = self._accounts().credentials(account)
+            return creds["token"] if creds else None
+        return settings.github_token or os.getenv("GITHUB_TOKEN") or None
+
     def _fail(self, lead, reply, content, settings, reason: str, kind: str = "") -> Dict[str, Any]:
         self.storage.log_post(
-            lead.id, reply.id, lead.platform, lead.url, content, settings.mode, "failed", reason, kind=kind
+            lead.id, reply.id, lead.platform, lead.url, content, settings.mode, "failed", reason, kind=kind,
+            account_id=reply.account_id,
         )
         return {"success": False, "reason": reason, "code": "api_failed", "fallback_action": "copy_and_open"}
 
-    def _publish_reddit_api(self, reply, lead, content, settings, kind: str) -> Dict[str, Any]:
-        creds = self._reddit_creds(settings)
+    def _publish_reddit_api(self, reply, lead, content, settings, kind: str, account=None) -> Dict[str, Any]:
+        creds = self._reddit_creds(settings, account)
         pid = reddit_post_id(lead.url)
         if not creds or not pid:
             return self._fail(lead, reply, content, settings, "Missing Reddit credentials or post id.", kind)
@@ -349,12 +416,12 @@ class CommunityPublisher:
 
     # ── GitHub ──
 
-    def _publish_github_api(self, reply, lead, content, settings, kind: str) -> Dict[str, Any]:
+    def _publish_github_api(self, reply, lead, content, settings, kind: str, account=None) -> Dict[str, Any]:
         m = _GITHUB_ISSUE.search(lead.url)
         if not m:
             return self._fail(lead, reply, content, settings, "Not a GitHub issue URL.", kind)
         owner, repo, number = m.groups()
-        token = settings.github_token or os.getenv("GITHUB_TOKEN")
+        token = self._github_token(settings, account)
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
@@ -380,6 +447,7 @@ class CommunityPublisher:
         reply.published_at = time.time()
         self.storage.save_reply(reply)
         self.storage.log_post(
-            lead.id, reply.id, lead.platform, lead.url, content, settings.mode, "published", kind=kind
+            lead.id, reply.id, lead.platform, lead.url, content, settings.mode, "published", kind=kind,
+            account_id=reply.account_id,
         )
         return {"success": True, "message": message, "url": reply.published_url}

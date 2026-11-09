@@ -15,7 +15,7 @@
     agent-reach discovery rules set r/sub --self-promo thread_only
     agent-reach discovery posting show|set|stop|resume
     agent-reach discovery skills list|show|manifest
-    agent-reach discovery check llm|search
+    agent-reach discovery check llm|search|youtube|connections
 
 Every command prints JSON. Errors print {"error": "..."} and exit with code 1.
 """
@@ -419,7 +419,15 @@ def _check(o: DiscoveryOrchestrator, rest: List[str]) -> int:
             "diagnostics": dict(chain.diagnostics),
             "sample": results[:1],
         })
-    return _fail("Use: check llm|search")
+    if what == "youtube":
+        from agent_reach.discovery import youtube
+
+        return _out(youtube.check(storage=o.storage))
+    if what == "connections":
+        from agent_reach.discovery import connections
+
+        return _out(connections.connections(rest[1] if len(rest) > 1 else "", o.accounts))
+    return _fail("Use: check llm|search|youtube|connections [source]")
 
 
 def _export(o: DiscoveryOrchestrator, rest: List[str]) -> int:

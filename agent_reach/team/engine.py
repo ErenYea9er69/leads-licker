@@ -478,6 +478,7 @@ class TeamEngine:
         brief = prompts.task_brief(
             task, directive, self._inputs_for(task, self.store.list_tasks(directive.id)), catalog,
             memory=self._memory_for(directive, role),
+            owner_said=(self._svc().storage.get_setting("intake_state", {}) or {}).get("facts") or None,
         )
         return {
             "role": {"name": role.name, "title": role.title},

@@ -93,9 +93,10 @@ def output_contract(role: RoleSpec) -> str:
 def task_brief(
     task: Task, directive: Directive, inputs: Dict[str, Any], tool_catalog: List[Dict[str, Any]],
     memory: Optional[List[str]] = None,
+    owner_said: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """The work order the CEO hands out. The host AI or a server worker reads it."""
-    return {
+    brief = {
         "task_id": task.id,
         "directive_id": directive.id,
         "title": task.title,
@@ -111,6 +112,13 @@ def task_brief(
         "tools": tool_catalog,
         "how_to_use_tools": "Launch a tool with ceo_call_tool(task_id, tool, args). Each call returns an evidence_id.",
     }
+    if owner_said:
+        brief["owner_said"] = owner_said
+        brief["owner_said_note"] = (
+            "The owner's own answers from the interview, in their words. Treat them as what the owner stated. "
+            "Add nothing to them and do not present them as verified facts about the market."
+        )
+    return brief
 
 
 def worker_prompt(brief: Dict[str, Any], transcript: List[Dict[str, Any]], role: RoleSpec) -> str:

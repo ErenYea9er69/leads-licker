@@ -10,8 +10,8 @@ from collections import Counter
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
-from agent_reach.discovery import thread_comments, voice
-from agent_reach.discovery.accounts import AccountService
+from agent_reach.discovery import thread_comments, thread_rules, voice
+from agent_reach.discovery.accounts import AccountService, account_key
 from agent_reach.discovery.analytics import DiscoveryAnalytics
 from agent_reach.discovery.business_engine import BusinessEngine
 from agent_reach.discovery.harvester import CommunityHarvester
@@ -21,6 +21,7 @@ from agent_reach.discovery.models import (
     Campaign,
     GeneratedReply,
     LeadQualification,
+    LinkedAccount,
     ReplyPreferences,
     ReplyTarget,
 )
@@ -111,12 +112,35 @@ class DiscoveryOrchestrator:
         prefs.voice_card = voice.analyze_samples(merged) if merged else {}
         return self.save_prefs(prefs)
 
+    def prefs_for(self, acc: Optional[LinkedAccount]) -> ReplyPreferences:
+        """The owner's preferences with the account's own voice laid over them, so each account sounds like itself."""
+        prefs = self.get_prefs()
+        own = self.accounts.voice_of(acc)
+        if own.get("voice_samples"):
+            prefs.voice_samples = list(own["voice_samples"])
+            prefs.voice_card = dict(own.get("voice_card") or {})
+        return prefs
+
+    def set_account_voice(self, platform: str, handle: str, samples: List[str], append: bool = False) -> Dict[str, object]:
+        acc = self.accounts.get(platform, handle)
+        if acc is None:
+            raise KeyError(f"{platform}/{handle} is not linked. Link it first.")
+        incoming = [voice.normalize_text(x) for x in samples if x and x.strip()]
+        current = list(self.accounts.voice_of(acc).get("voice_samples") or [])
+        merged = list(dict.fromkeys((current + incoming) if append else incoming))[-60:]
+        card = voice.analyze_samples(merged) if merged else {}
+        self.accounts.set_voice(acc, merged, card)
+        return {"account": account_key(acc), "total_samples": len(merged), "voice_card": card}
+
     def import_voice_from_account(self, platform: str, handle: str, limit: int = 40) -> Dict[str, object]:
         samples = self.accounts.import_voice_samples(platform, handle, limit)
         if not samples:
             return {"imported": 0, "note": "No usable public comments found. Paste samples by hand."}
-        prefs = self.set_voice_samples(samples, append=True)
-        return {"imported": len(samples), "total_samples": len(prefs.voice_samples), "voice_card": prefs.voice_card}
+        acc = self.accounts.get(platform, handle)
+        result = self.set_account_voice(platform, handle, samples, append=True)
+        if len(self.accounts.list()) <= 1:   # one account: the global voice follows it, as before
+            self.set_voice_samples(samples, append=True)
+        return {"imported": len(samples), **result, "stored_for": account_key(acc) if acc else ""}
 
     def publisher_for(self, profile: Optional[BusinessProfile] = None) -> CommunityPublisher:
         profile = profile or self.storage.get_latest_business_profile()
@@ -128,14 +152,18 @@ class DiscoveryOrchestrator:
 
     # ── Drafting ──
 
-    def _previous_texts(self, limit: int = 20) -> List[str]:
+    def _previous_texts(self, limit: int = 20, thread: Optional[List[GeneratedReply]] = None) -> List[str]:
+        """Recent replies from every account. The thread's own replies come last, so the prompt shows them."""
         out: List[str] = []
-        for r in self.storage.list_replies(limit=limit):
+        for r in list(self.storage.list_replies(limit=limit)) + list(thread or []):
             text = r.edited_reply or (r.product_aware if r.selected_version == "product_aware" else r.value_first)
-            if text:
+            if text and text not in out:
                 out.append(text)
             if r.product_aware and r.product_aware not in out:
                 out.append(r.product_aware)
+        if thread:   # move the thread's texts to the end
+            mine = [t for r in thread for t in (thread_rules.reply_text(r), r.product_aware) if t]
+            out = [t for t in out if t not in mine] + list(dict.fromkeys(mine))
         return out
 
     def choose_target(
@@ -144,18 +172,28 @@ class DiscoveryOrchestrator:
         profile: BusinessProfile,
         mode: str = "auto",
         comment_id: str = "",
+        avoid: Optional[List[GeneratedReply]] = None,
     ) -> Tuple[Optional[ReplyTarget], List[ReplyTarget], List[str]]:
         """Read the thread's comments and pick where the reply goes.
 
         mode: "auto" takes the best scored target, "post" answers the post, "comment" needs `comment_id`
-        or takes the best comment. Returns (chosen, candidates, warnings).
+        or takes the best comment. `avoid` lists replies already on the thread: their targets and the people
+        they answered are skipped. Returns (chosen, candidates, warnings).
         """
         if mode == "post":
             return None, [], []
-        post, comments, warnings = thread_comments.fetch_comments(lead.url)
+        post, comments, warnings = thread_comments.fetch_comments(lead.url, storage=self.storage)
         if not post and not comments:
             return None, [], warnings
         ranked = thread_comments.rank_targets(post, comments, profile)
+        if avoid:
+            taken = {r.target_key for r in avoid}
+            answered = {r.target_author.lower() for r in avoid if r.target_author}
+            ranked = [
+                t for t in ranked
+                if ("comment:" + t.target_comment_id if t.target_kind == "comment" and t.target_comment_id else "post") not in taken
+                and not (t.target_author and t.target_author.lower() in answered)
+            ]
         if comment_id:
             pick = next((t for t in ranked if t.target_comment_id == comment_id), None)
             if pick is None:
@@ -180,24 +218,63 @@ class DiscoveryOrchestrator:
         target_mode: str = "auto",
         comment_id: str = "",
         read_thread: bool = True,
+        account: str = "",
+        keep_others: bool = False,
     ) -> GeneratedReply:
-        """Draft replies for one lead and save them. Raises ReplyGenerationError when drafting is not allowed."""
+        """Draft replies for one lead and save them. Raises ReplyGenerationError when drafting is not allowed.
+
+        `account` is "platform:handle". When empty, the app picks one (a thread that already has a reply keeps
+        its account). `keep_others` adds a second reply on the thread instead of replacing the open draft.
+        """
         profile = profile or self.storage.get_latest_business_profile()
         if profile is None:
             raise ValueError("No business profile found.")
         if not can_draft(lead.platform):
             raise ReplyGenerationError(f"{lead.platform} does not allow drafted replies. Use the thread for research.")
-        prefs = self.get_prefs()
-        health = self.accounts.health(lead.platform, product_name=profile.name)
+        settings = self.storage.get_posting_settings()
+        siblings = self.storage.thread_replies(lead.url)
+        acc: Optional[LinkedAccount] = None
+        if account:
+            acc = self.accounts.get_by_key(account)
+            if acc is None:
+                raise ReplyGenerationError(f"{account} is not linked. Link it first.")
+        else:
+            acc, why = self.accounts.pick(
+                lead.platform, thread=siblings, community=lead.community, settings=settings, product_name=profile.name
+            )
+            if acc is None and self.accounts.for_platform(lead.platform):
+                raise ReplyGenerationError(why)
+        key = account_key(acc) if acc else ""
+        prefs = self.prefs_for(acc)
+        health = self.accounts.health(lead.platform, acc.handle if acc else None, product_name=profile.name)
         max_level = health.max_pitch_level if health.known else None
+
+        # Open drafts do not block a new draft unless the owner keeps them. Replies already approved or sent do.
+        avoid = [r for r in siblings if r.status != "draft" or keep_others]
         target = None
-        if read_thread or comment_id:
-            target, _, _ = self.choose_target(lead, profile, target_mode, comment_id)
+        if read_thread or comment_id or avoid:
+            target, _, _ = self.choose_target(lead, profile, target_mode, comment_id, avoid=avoid)
+        probe = GeneratedReply(
+            lead_id=lead.id, value_first="x", platform=lead.platform, account_id=key,
+            target_kind=target.target_kind if target else "post",
+            target_comment_id=target.target_comment_id if target else "",
+            target_author=target.target_author if target else "",
+        )
+        code, message = thread_rules.check_draft(siblings, probe, settings, texts=[], keep_others=keep_others)
+        if code != "ok":
+            raise ReplyGenerationError(f"{code}: {message}")
+
+        others = [r for r in siblings if r.id not in thread_rules.replaced_by(siblings, probe, keep_others)]
         reply = self.reply_generator.generate_replies(
             lead, profile, target=target, prefs=prefs, max_pitch_level=max_level,
-            previous=self._previous_texts(),
+            previous=self._previous_texts(thread=others),
+            thread_texts=[thread_rules.reply_text(r) for r in others if r.status != "rejected"],
         )
-        self.storage.save_reply(reply)
+        reply.account_id = key
+        code, message = thread_rules.check_draft(siblings, reply, settings, keep_others=keep_others)
+        if code != "ok":
+            raise ReplyGenerationError(f"{code}: {message}")
+        self.storage.save_reply(reply, keep_others=keep_others)
         return reply
 
     def approve_reply(
